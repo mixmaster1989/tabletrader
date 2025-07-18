@@ -1,8 +1,11 @@
 # Конфиденциальные файлы
 service-account-key.json
 credentials.json
+*.json
 .env
 *.env
+token.pickle
+*.pickle
 
 # Python
 __pycache__/

@@ -1,9 +1,6 @@
 import logging
 import os
-import pickle
 from typing import List, Dict, Optional
-from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
@@ -18,24 +15,20 @@ class GoogleSheetsOAuthAPI:
 
     def _initialize_service(self):
         try:
-            creds = None
-            if os.path.exists('token.pickle'):
-                with open('token.pickle', 'rb') as token:
-                    creds = pickle.load(token)
-            if not creds or not creds.valid:
-                if creds and creds.expired and creds.refresh_token:
-                    creds.refresh(Request())
-                else:
-                    if not os.path.exists(self.credentials_file):
-                        self.logger.error(f"Файл {self.credentials_file} не найден!")
-                        raise Exception("Файл credentials.json не найден")
-                    flow = InstalledAppFlow.from_client_secrets_file(
-                        self.credentials_file, self.SCOPES)
-                    creds = flow.run_local_server(port=0)
-                with open('token.pickle', 'wb') as token:
-                    pickle.dump(creds, token)
+            from google.oauth2 import service_account
+            
+            if not os.path.exists(self.credentials_file):
+                self.logger.error(f"Файл {self.credentials_file} не найден!")
+                raise Exception("Файл credentials.json не найден")
+            
+            # Используем Service Account аутентификацию
+            creds = service_account.Credentials.from_service_account_file(
+                self.credentials_file, 
+                scopes=self.SCOPES
+            )
+            
             self.service = build('sheets', 'v4', credentials=creds)
-            self.logger.info("Google Sheets API инициализирован с OAuth2")
+            self.logger.info("Google Sheets API инициализирован с Service Account")
         except Exception as e:
             self.logger.error(f"Ошибка инициализации Google Sheets API: {e}")
             raise
