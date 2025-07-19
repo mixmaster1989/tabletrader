@@ -11,7 +11,7 @@ from pybit.unified_trading import HTTP
 from typing import Dict, List, Optional
 
 class BybitAPI:
-    def __init__(self, api_key: str, api_secret: str, testnet: bool = False):
+    def __init__(self, api_key: str, api_secret: str, testnet: bool = True):
         self.api_key = api_key
         self.api_secret = api_secret
         self.testnet = testnet
@@ -27,6 +27,19 @@ class BybitAPI:
         # Кэш для цен
         self._price_cache = {}
         self._cache_duration = 5  # секунды
+        
+        # Проверяем подключение к тестовой сети
+        if testnet:
+            self.logger.info("🔄 Подключение к тестовой сети Bybit...")
+            try:
+                # Проверяем баланс тестового аккаунта
+                balance = self.get_balance()
+                if balance:
+                    self.logger.info(f"✅ Подключение к тестовой сети успешно! Баланс: {balance.get('totalWalletBalance', 'N/A')} USDT")
+                else:
+                    self.logger.warning("⚠️ Не удалось получить баланс тестового аккаунта")
+            except Exception as e:
+                self.logger.error(f"❌ Ошибка подключения к тестовой сети: {e}")
         
         self.logger.info(f"✅ Bybit API инициализирован (testnet: {testnet})")
     
@@ -62,8 +75,8 @@ class BybitAPI:
             if symbol:
                 result = self.session.get_positions(category="linear", symbol=symbol)
             else:
-                # Если symbol не указан, получаем все позиции
-                result = self.session.get_positions(category="linear")
+                # Если symbol не указан, получаем все позиции с указанием settleCoin
+                result = self.session.get_positions(category="linear", settleCoin="USDT")
             
             positions = result.get('result', {}).get('list', [])
             
@@ -85,10 +98,32 @@ class BybitAPI:
         try:
             result = self.session.get_wallet_balance(accountType='UNIFIED')
             balances = result.get('result', {}).get('list', [])
-            return balances[0] if balances else {}
+            balance = balances[0] if balances else {}
+            
+            if self.testnet and balance:
+                self.logger.info(f"💰 Тестовый баланс: {balance.get('totalWalletBalance', 'N/A')} USDT")
+                self.logger.info(f"💵 Доступно: {balance.get('availableToWithdraw', 'N/A')} USDT")
+            
+            return balance
             
         except Exception as e:
             self.logger.error(f"❌ Ошибка получения баланса: {e}")
+            return {}
+    
+    def get_account_info(self) -> Dict:
+        """Получить информацию об аккаунте"""
+        try:
+            result = self.session.get_account_info()
+            account_info = result.get('result', {})
+            
+            if self.testnet:
+                self.logger.info(f"🏦 Тип аккаунта: {account_info.get('accountType', 'N/A')}")
+                self.logger.info(f"📊 Уровень риска: {account_info.get('riskLevel', 'N/A')}")
+            
+            return account_info
+            
+        except Exception as e:
+            self.logger.error(f"❌ Ошибка получения информации об аккаунте: {e}")
             return {}
     
     def open_order_with_tp_sl(self, params: Dict) -> Dict:
@@ -101,13 +136,26 @@ class BybitAPI:
             take_profit = params['take_profit']
             stop_loss = params['stop_loss']
             
+            # Проверяем баланс перед открытием ордера
+            if self.testnet:
+                balance = self.get_balance()
+                if balance:
+                    available_balance = float(balance.get('availableToWithdraw', 0))
+                    required_margin = float(size) * leverage / 100  # Примерный расчет
+                    if available_balance < required_margin:
+                        self.logger.warning(f"⚠️ Недостаточно средств в тестовом аккаунте. Требуется: {required_margin} USDT, доступно: {available_balance} USDT")
+            
             # Устанавливаем плечо
-            self.session.set_leverage(
-                category="linear",
-                symbol=symbol,
-                buyLeverage=str(leverage),
-                sellLeverage=str(leverage)
-            )
+            try:
+                self.session.set_leverage(
+                    category="linear",
+                    symbol=symbol,
+                    buyLeverage=str(leverage),
+                    sellLeverage=str(leverage)
+                )
+                self.logger.info(f"🔧 Плечо установлено: {leverage}x для {symbol}")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Не удалось установить плечо: {e}")
             
             # Открываем позицию
             order_result = self.session.place_order(
@@ -123,7 +171,11 @@ class BybitAPI:
                 # Устанавливаем TP/SL
                 self._set_take_profit_stop_loss(symbol, side, size, take_profit, stop_loss)
                 
-                self.logger.info(f"✅ Ордер открыт: {symbol} {side} {size}")
+                if self.testnet:
+                    self.logger.info(f"🎯 ТЕСТОВЫЙ ОРДЕР ОТКРЫТ: {symbol} {side} {size} (плечо: {leverage}x)")
+                    self.logger.info(f"📈 TP: {take_profit}, 📉 SL: {stop_loss}")
+                else:
+                    self.logger.info(f"✅ Ордер открыт: {symbol} {side} {size}")
                 return order_result
             else:
                 self.logger.error(f"❌ Ошибка открытия ордера: {order_result}")

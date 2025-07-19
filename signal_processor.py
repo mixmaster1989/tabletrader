@@ -74,20 +74,26 @@ class SignalProcessor:
                     # Проверяем возможность входа
                     if self._can_enter_position(signal):
                         # Проверяем режим работы
-                        if self.config['TRADE_MODE'] == 'monitor':
+                        trade_mode = self.config.get('TRADE_MODE', 'trade')
+                        
+                        if trade_mode == 'monitor':
                             # Режим мониторинга - только логируем
                             self.logger.info(f"📊 РЕЖИМ МОНИТОРИНГА: Найден сигнал {signal['symbol']} {signal['direction']} по цене {signal['entry_price']}")
                             self.processed_signals.add(signal_id)
                             processed_count += 1
                         else:
-                            # Режим торговли - открываем сделки
+                            # Режим торговли - открываем сделки в тестовой сети
+                            self.logger.info(f"🎯 РЕЖИМ ТОРГОВЛИ: Выполняю сигнал {signal['symbol']} {signal['direction']}")
                             result = self._execute_signal(signal)
                             
                             if result['success']:
                                 self.processed_signals.add(signal_id)
                                 processed_count += 1
-                                # Отмечаем как обработанный
-                                self.google_sheets.mark_signal_processed(signal['row'])
+                                # Отмечаем как обработанный в Google Sheets
+                                try:
+                                    self.google_sheets.mark_signal_processed(signal['row'])
+                                except Exception as e:
+                                    self.logger.warning(f"⚠️ Не удалось отметить сигнал как обработанный: {e}")
                             else:
                                 error_count += 1
                                 self.logger.error(f"❌ Ошибка выполнения сигнала: {result['error']}")
@@ -111,40 +117,59 @@ class SignalProcessor:
             return {'processed': 0, 'errors': 1}
     
     def _can_enter_position(self, signal: Dict) -> bool:
-        """Проверка возможности входа в позицию"""
+        """Проверка возможности входа в позицию в тестовой сети"""
         try:
             # Проверяем количество открытых позиций
             positions = self.bybit.get_positions()
-            if len(positions) >= self.config['MAX_POSITIONS']:
-                self.logger.warning(f"⚠️ Достигнут лимит позиций ({self.config['MAX_POSITIONS']})")
+            max_positions = self.config.get('MAX_POSITIONS', 3)
+            
+            if len(positions) >= max_positions:
+                self.logger.warning(f"⚠️ Достигнут лимит позиций ({max_positions})")
                 return False
             
             # Проверяем, нет ли уже позиции по этой монете
-            for pos in positions:
-                if pos.get('symbol') == signal['symbol']:
-                    self.logger.info(f"⏸️ Позиция по {signal['symbol']} уже открыта")
-                    return False
+            bybit_symbol = signal.get('bybit_symbol')
+            if bybit_symbol:
+                for pos in positions:
+                    if pos.get('symbol') == bybit_symbol:
+                        self.logger.info(f"⏸️ Позиция по {signal['symbol']} ({bybit_symbol}) уже открыта")
+                        return False
             
             # Проверяем цену входа
-            bybit_symbol = signal.get('bybit_symbol')
             if not bybit_symbol:
                 self.logger.error(f"❌ Нет bybit_symbol для сигнала {signal['symbol']} — пропуск")
                 return False
+                
             self.logger.info(f"🔍 Запрос к Bybit: bybit_symbol={bybit_symbol} (исходный: {signal['symbol']})")
             current_price = self.bybit.get_last_price(bybit_symbol)
             if not current_price:
                 self.logger.error(f"❌ Не удалось получить цену для {signal['symbol']}")
                 return False
             
-            # Для бэктеста отключаем проверку отклонения цены (работаем с историческими данными)
+            # Проверяем отклонение цены (в тестовой сети более мягкие условия)
             price_deviation = abs(current_price - signal['entry_price']) / signal['entry_price'] * 100
-            self.logger.info(f"📊 {signal['symbol']}: историческая цена {signal['entry_price']:.6f}, текущая {current_price:.6f}, отклонение {price_deviation:.2f}%")
+            max_deviation = self.config.get('PRICE_DEVIATION', 1.0)  # 1% по умолчанию
             
-            # В бэктесте пропускаем проверку отклонения цены
-            # if price_deviation > self.config['PRICE_DEVIATION']:
-            #     self.logger.warning(f"⚠️ Цена {signal['symbol']} отклонена на {price_deviation:.2f}%")
-            #     return False
+            self.logger.info(f"📊 {signal['symbol']}: цена входа {signal['entry_price']:.6f}, текущая {current_price:.6f}, отклонение {price_deviation:.2f}%")
             
+            if price_deviation > max_deviation:
+                self.logger.warning(f"⚠️ Цена {signal['symbol']} отклонена на {price_deviation:.2f}% (максимум {max_deviation}%)")
+                return False
+            
+            # Проверяем баланс тестового аккаунта
+            if self.bybit.testnet:
+                balance = self.bybit.get_balance()
+                if balance:
+                    available_balance = float(balance.get('availableToWithdraw', 0))
+                    required_margin = float(self.config.get('DEFAULT_POSITION_SIZE', 0.01)) * self.config.get('DEFAULT_LEVERAGE', 10) / 100
+                    
+                    if available_balance < required_margin:
+                        self.logger.warning(f"⚠️ Недостаточно средств в тестовом аккаунте. Требуется: {required_margin} USDT, доступно: {available_balance} USDT")
+                        return False
+                    
+                    self.logger.info(f"💰 Тестовый баланс: {available_balance} USDT, требуется: {required_margin} USDT")
+            
+            self.logger.info(f"✅ Условия для входа в позицию {signal['symbol']} выполнены")
             return True
             
         except Exception as e:
@@ -152,22 +177,53 @@ class SignalProcessor:
             return False
     
     def _execute_signal(self, signal: Dict) -> Dict:
-        """Выполнение торгового сигнала"""
+        """Выполнение торгового сигнала в тестовой сети"""
         try:
+            # Получаем Bybit символ
+            bybit_symbol = signal.get('bybit_symbol')
+            if not bybit_symbol:
+                return {
+                    'success': False,
+                    'error': f"Нет bybit_symbol для {signal['symbol']}"
+                }
+            
             # Подготавливаем параметры ордера
             order_params = {
-                'symbol': signal['symbol'],
-                'side': signal['direction'],
-                'size': self.config['DEFAULT_POSITION_SIZE'],
-                'leverage': self.config['DEFAULT_LEVERAGE'],
-                'take_profit': signal['take_profit'],
-                'stop_loss': signal['stop_loss']
+                'symbol': bybit_symbol,  # Используем Bybit символ
+                'side': 'Buy' if signal['direction'] == 'LONG' else 'Sell',
+                'size': self.config.get('DEFAULT_POSITION_SIZE', 0.01),
+                'leverage': self.config.get('DEFAULT_LEVERAGE', 10),
+                'take_profit': signal.get('take_profit', 0),
+                'stop_loss': signal.get('stop_loss', 0)
             }
+            
+            # Логируем параметры сделки
+            self.logger.info(f"🎯 ВЫПОЛНЕНИЕ СИГНАЛА В ТЕСТОВОЙ СЕТИ:")
+            self.logger.info(f"   Символ: {signal['symbol']} -> {bybit_symbol}")
+            self.logger.info(f"   Направление: {signal['direction']} -> {order_params['side']}")
+            self.logger.info(f"   Размер: {order_params['size']}")
+            self.logger.info(f"   Плечо: {order_params['leverage']}x")
+            self.logger.info(f"   TP: {order_params['take_profit']}")
+            self.logger.info(f"   SL: {order_params['stop_loss']}")
             
             # Открываем позицию
             result = self.bybit.open_order_with_tp_sl(order_params)
             
             if result.get('retCode') == 0:
+                # Отправляем уведомление в Telegram
+                message = f"🎯 ТЕСТОВАЯ СДЕЛКА ОТКРЫТА!\n\n"
+                message += f"📊 Символ: {signal['symbol']}\n"
+                message += f"📈 Направление: {signal['direction']}\n"
+                message += f"💰 Размер: {order_params['size']}\n"
+                message += f"⚡ Плечо: {order_params['leverage']}x\n"
+                message += f"📈 Take Profit: {order_params['take_profit']}\n"
+                message += f"📉 Stop Loss: {order_params['stop_loss']}\n"
+                message += f"🆔 Order ID: {result.get('result', {}).get('orderId', 'N/A')}"
+                
+                self.telegram.send_message(message)
+                
+                self.logger.info(f"✅ ТЕСТОВАЯ СДЕЛКА УСПЕШНО ОТКРЫТА: {signal['symbol']}")
+                
                 return {
                     'success': True,
                     'order_id': result.get('result', {}).get('orderId'),
@@ -175,12 +231,20 @@ class SignalProcessor:
                     'size': order_params['size']
                 }
             else:
+                error_msg = f"❌ Ошибка открытия тестовой сделки: {result.get('retMsg', 'Unknown error')}"
+                self.logger.error(error_msg)
+                self.telegram.send_error(error_msg)
+                
                 return {
                     'success': False,
                     'error': result.get('retMsg', 'Unknown error')
                 }
                 
         except Exception as e:
+            error_msg = f"❌ Исключение при открытии тестовой сделки: {str(e)}"
+            self.logger.error(error_msg)
+            self.telegram.send_error(error_msg)
+            
             return {
                 'success': False,
                 'error': str(e)
@@ -338,4 +402,60 @@ class SignalProcessor:
             self.log(f"❌ Ошибка анализа паттернов: {e}")
             self.logger.error(f"🧠 АНАЛИЗАТОР ПАТТЕРНОВ: Ошибка - {e}")
             import traceback
-            self.logger.error(f"🧠 АНАЛИЗАТОР ПАТТЕРНОВ: Traceback: {traceback.format_exc()}") 
+            self.logger.error(f"🧠 АНАЛИЗАТОР ПАТТЕРНОВ: Traceback: {traceback.format_exc()}")
+    
+    def monitor_positions(self):
+        """Мониторинг открытых позиций в тестовой сети"""
+        try:
+            positions = self.bybit.get_positions()
+            
+            if not positions:
+                return
+            
+            self.logger.info(f"📊 Мониторинг {len(positions)} открытых позиций...")
+            
+            for pos in positions:
+                symbol = pos.get('symbol', 'Unknown')
+                side = pos.get('side', 'Unknown')
+                size = pos.get('size', '0')
+                unrealized_pnl = pos.get('unrealisedPnl', '0')
+                mark_price = pos.get('markPrice', '0')
+                
+                # Отправляем статус в Telegram каждые 10 циклов
+                if self.cycle_count % 10 == 0:
+                    message = f"📊 ПОЗИЦИЯ: {symbol}\n"
+                    message += f"📈 Сторона: {side}\n"
+                    message += f"💰 Размер: {size}\n"
+                    message += f"📊 P&L: {unrealized_pnl}\n"
+                    message += f"💵 Цена: {mark_price}"
+                    
+                    self.telegram.send_message(message)
+                
+                self.logger.info(f"   {symbol} {side}: размер={size}, P&L={unrealized_pnl}, цена={mark_price}")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Ошибка мониторинга позиций: {e}")
+    
+    def send_testnet_status(self):
+        """Отправка статуса тестовой сети в Telegram"""
+        try:
+            # Получаем баланс
+            balance = self.bybit.get_balance()
+            positions = self.bybit.get_positions()
+            
+            message = f"🎯 СТАТУС ТЕСТОВОЙ СЕТИ\n\n"
+            
+            if balance:
+                total_balance = balance.get('totalWalletBalance', 'N/A')
+                available_balance = balance.get('availableToWithdraw', 'N/A')
+                message += f"💰 Общий баланс: {total_balance} USDT\n"
+                message += f"💵 Доступно: {available_balance} USDT\n"
+            
+            message += f"📊 Открытых позиций: {len(positions)}\n"
+            message += f"🔄 Цикл: {self.cycle_count}\n"
+            message += f"⏰ Время: {datetime.now().strftime('%H:%M:%S')}"
+            
+            self.telegram.send_message(message)
+            
+        except Exception as e:
+            self.logger.error(f"❌ Ошибка отправки статуса: {e}") 

@@ -38,7 +38,7 @@ class GoogleSheetsAPI:
             self.logger.error(f"❌ Ошибка инициализации Google Sheets API: {e}")
             raise
     
-    def read_signals(self, range_name: str = "Trades!A10:Q24") -> List[Dict]:
+    def read_signals(self, range_name: str = "Trades!A:Q") -> List[Dict]:
         """
         Читать сигналы из Google таблицы
         
@@ -71,15 +71,16 @@ class GoogleSheetsAPI:
             
             signals = []
             self.logger.info(f"🔍 Обрабатываем {len(values)} строк из таблицы")
-            for i, row in enumerate(values, start=10):  # Начинаем с 10 строки
+            for i, row in enumerate(values, start=1):  # Начинаем с 1 строки
                 self.logger.info(f"🔍 Строка {i}: {row} (колонок: {len(row)})")
                 try:
                     self.logger.info(f"🔍 Обрабатываем строку {i}: {row}")
                     self.logger.info(f"🔍 Проверяем условие len(row) >= 7: {len(row)} >= 7 = {len(row) >= 7}")
                     if len(row) >= 7:  # Минимум 7 колонок (A:G)
-                        # Пропускаем только пустые строки и заголовки
+                        # Пропускаем пустые строки и заголовки
                         if (not row[1] or row[1].strip() == '' or 
-                            row[1].strip().lower() in ['монета', 'дата входа']):
+                            row[1].strip().lower() in ['монета', 'дата входа', 'дата', 'символ', 'направление'] or
+                            row[1].strip().isdigit() == False and len(row[1].strip()) < 3):
                             self.logger.info(f"🔍 Пропускаем строку {i} - заголовок или пустая")
                             continue
                             

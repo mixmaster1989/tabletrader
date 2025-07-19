@@ -20,6 +20,7 @@ class TelegramBot:
         self.base_url = f"https://api.telegram.org/bot{bot_token}"
         self.logger = logging.getLogger(__name__)
         self.google_sheets_api = google_sheets_api
+        self.market_analyzer = None
         
         # Состояние пользователей для добавления сделок
         self.user_states = {}
@@ -100,7 +101,10 @@ class TelegramBot:
         keyboard = {
             "inline_keyboard": [
                 [{"text": "➕ Добавить сделку", "callback_data": "add_trade"}],
+                [{"text": "🔍 Анализ рынка", "callback_data": "market_analysis"}],
                 [{"text": "📊 Посмотреть статус", "callback_data": "status"}],
+                [{"text": "🎯 Статус тестовой сети", "callback_data": "testnet_status"}],
+                [{"text": "💰 Баланс аккаунта", "callback_data": "balance"}],
                 [{"text": "❌ Отмена", "callback_data": "cancel"}]
             ]
         }
@@ -296,11 +300,248 @@ class TelegramBot:
             self.logger.error(f"❌ Ошибка добавления сделки: {e}")
             return False
     
+    def send_market_analysis_menu(self) -> bool:
+        """Отправить меню анализа рынка"""
+        message = """🔍 АНАЛИЗ РЫНКА
+
+Выберите тип анализа:"""
+        
+        keyboard = {
+            "inline_keyboard": [
+                [{"text": "📊 Анализ всех монет", "callback_data": "analyze_all"}],
+                [{"text": "🪙 Анализ конкретной монеты", "callback_data": "analyze_symbol"}],
+                [{"text": "📈 Лучшие сигналы", "callback_data": "best_signals"}],
+                [{"text": "🔙 Назад", "callback_data": "back_to_main"}]
+            ]
+        }
+        
+        return self.send_message(message, reply_markup=keyboard)
+    
+    def send_symbol_analysis_selection(self, user_id: str) -> bool:
+        """Отправить выбор символа для анализа"""
+        message = """🪙 ВЫБЕРИТЕ МОНЕТУ ДЛЯ АНАЛИЗА
+
+Выберите криптовалюту:"""
+        
+        keyboard = {
+            "inline_keyboard": [
+                [{"text": "BTC", "callback_data": f"analyze_BTCUSDT"}, {"text": "ETH", "callback_data": f"analyze_ETHUSDT"}],
+                [{"text": "SOL", "callback_data": f"analyze_SOLUSDT"}, {"text": "ADA", "callback_data": f"analyze_ADAUSDT"}],
+                [{"text": "XRP", "callback_data": f"analyze_XRPUSDT"}, {"text": "BNB", "callback_data": f"analyze_BNBUSDT"}],
+                [{"text": "AVAX", "callback_data": f"analyze_AVAXUSDT"}, {"text": "LINK", "callback_data": f"analyze_LINKUSDT"}],
+                [{"text": "DOGE", "callback_data": f"analyze_DOGEUSDT"}, {"text": "NEAR", "callback_data": f"analyze_NEARUSDT"}],
+                [{"text": "PEOPLE", "callback_data": f"analyze_PEOPLEUSDT"}, {"text": "MATIC", "callback_data": f"analyze_MATICUSDT"}],
+                [{"text": "🔙 Назад", "callback_data": "market_analysis"}]
+            ]
+        }
+        
+        # Сохраняем состояние пользователя
+        self.user_states[user_id] = {"state": "selecting_analysis_symbol"}
+        
+        return self.send_message(message, reply_markup=keyboard)
+    
+    def send_analysis_results(self, symbol: str, signals: list) -> bool:
+        """Отправить результаты анализа"""
+        try:
+            if not signals:
+                message = f"""🔍 РЕЗУЛЬТАТЫ АНАЛИЗА {symbol}
+
+❌ Сигналов не найдено
+
+Попробуйте другой символ или время."""
+                return self.send_message(message)
+            
+            message = f"""🔍 РЕЗУЛЬТАТЫ АНАЛИЗА {symbol}
+
+📊 Найдено сигналов: {len(signals)}
+
+"""
+            
+            for i, signal in enumerate(signals[:3], 1):
+                confidence_percent = signal.confidence * 100
+                rr_ratio = signal.risk_reward_ratio
+                
+                message += f"""🎯 СИГНАЛ #{i}
+
+📈 Направление: {signal.direction}
+💵 Цена входа: {signal.entry_price:.6f}
+💰 Take Profit: {signal.take_profit:.6f}
+🛑 Stop Loss: {signal.stop_loss:.6f}
+📊 Уверенность: {confidence_percent:.1f}%
+⚖️ Риск/Прибыль: 1:{rr_ratio:.2f}
+🎯 Стратегия: {signal.strategy}
+💡 Обоснование: {signal.reasoning}
+
+"""
+            
+            keyboard = {
+                "inline_keyboard": [
+                    [{"text": "➕ Добавить лучший сигнал", "callback_data": f"add_best_signal_{symbol}"}],
+                    [{"text": "🔄 Анализировать другую монету", "callback_data": "analyze_symbol"}],
+                    [{"text": "🔙 Назад", "callback_data": "market_analysis"}]
+                ]
+            }
+            
+            return self.send_message(message, reply_markup=keyboard)
+            
+        except Exception as e:
+            self.logger.error(f"❌ Ошибка отправки результатов анализа: {e}")
+            return False
+    
+    def send_all_analysis_results(self, all_results: dict) -> bool:
+        """Отправить результаты анализа всех монет"""
+        try:
+            if not all_results:
+                message = """🔍 РЕЗУЛЬТАТЫ АНАЛИЗА ВСЕХ МОНЕТ
+
+❌ Сигналов не найдено
+
+Попробуйте позже."""
+                return self.send_message(message)
+            
+            message = """🔍 ЛУЧШИЕ СИГНАЛЫ РЫНКА
+
+"""
+            
+            # Собираем все сигналы и сортируем по уверенности
+            all_signals = []
+            for symbol, signals in all_results.items():
+                for signal in signals:
+                    all_signals.append((symbol, signal))
+            
+            # Сортируем по уверенности
+            all_signals.sort(key=lambda x: x[1].confidence, reverse=True)
+            
+            # Показываем топ-5
+            for i, (symbol, signal) in enumerate(all_signals[:5], 1):
+                confidence_percent = signal.confidence * 100
+                rr_ratio = signal.risk_reward_ratio
+                
+                message += f"""🎯 #{i} {symbol}
+
+📈 {signal.direction} | 💵 {signal.entry_price:.6f}
+💰 TP: {signal.take_profit:.6f} | 🛑 SL: {signal.stop_loss:.6f}
+📊 {confidence_percent:.1f}% | ⚖️ 1:{rr_ratio:.2f}
+🎯 {signal.strategy}
+
+"""
+            
+            keyboard = {
+                "inline_keyboard": [
+                    [{"text": "➕ Добавить лучший сигнал", "callback_data": f"add_best_signal_{all_signals[0][0] if all_signals else ''}"}],
+                    [{"text": "🔄 Обновить анализ", "callback_data": "analyze_all"}],
+                    [{"text": "🔙 Назад", "callback_data": "market_analysis"}]
+                ]
+            }
+            
+            return self.send_message(message, reply_markup=keyboard)
+            
+        except Exception as e:
+            self.logger.error(f"❌ Ошибка отправки результатов анализа всех монет: {e}")
+            return False
+    
     def handle_callback_query(self, callback_data: str, user_id: str) -> bool:
         """Обработать callback query от кнопок"""
         try:
             if callback_data == "add_trade":
                 return self.send_symbol_selection(user_id)
+            
+            elif callback_data == "market_analysis":
+                return self.send_market_analysis_menu()
+            
+            elif callback_data == "analyze_all":
+                # Анализ всех монет
+                if not self.market_analyzer:
+                    return self.send_message("❌ Анализатор рынка не инициализирован")
+                
+                try:
+                    self.send_message("🔍 Анализируем все монеты... Это может занять несколько минут.")
+                    all_results = self.market_analyzer.analyze_all_symbols()
+                    return self.send_all_analysis_results(all_results)
+                except Exception as e:
+                    self.logger.error(f"❌ Ошибка анализа всех монет: {e}")
+                    return self.send_message(f"❌ Ошибка анализа: {e}")
+            
+            elif callback_data == "analyze_symbol":
+                return self.send_symbol_analysis_selection(user_id)
+            
+            elif callback_data == "best_signals":
+                # Лучшие сигналы (анализ всех монет и показ топ-5)
+                if not self.market_analyzer:
+                    return self.send_message("❌ Анализатор рынка не инициализирован")
+                
+                try:
+                    self.send_message("🔍 Ищем лучшие сигналы... Это может занять несколько минут.")
+                    all_results = self.market_analyzer.analyze_all_symbols()
+                    return self.send_all_analysis_results(all_results)
+                except Exception as e:
+                    self.logger.error(f"❌ Ошибка поиска лучших сигналов: {e}")
+                    return self.send_message(f"❌ Ошибка поиска сигналов: {e}")
+            
+            elif callback_data == "back_to_main":
+                return self.send_add_trade_menu()
+            
+            elif callback_data.startswith("analyze_"):
+                symbol = callback_data.replace("analyze_", "")
+                # Анализ конкретной монеты
+                if not self.market_analyzer:
+                    return self.send_message("❌ Анализатор рынка не инициализирован")
+                
+                try:
+                    self.send_message(f"🔍 Анализируем {symbol}...")
+                    signals = self.market_analyzer.analyze_symbol(symbol)
+                    return self.send_analysis_results(symbol, signals)
+                except Exception as e:
+                    self.logger.error(f"❌ Ошибка анализа {symbol}: {e}")
+                    return self.send_message(f"❌ Ошибка анализа {symbol}: {e}")
+            
+            elif callback_data.startswith("add_best_signal_"):
+                symbol = callback_data.replace("add_best_signal_", "")
+                # Добавление лучшего сигнала
+                if not self.market_analyzer:
+                    return self.send_message("❌ Анализатор рынка не инициализирован")
+                
+                try:
+                    signals = self.market_analyzer.analyze_symbol(symbol)
+                    if not signals:
+                        return self.send_message(f"❌ Для {symbol} не найдено сигналов")
+                    
+                    # Берем лучший сигнал
+                    best_signal = signals[0]
+                    
+                    # Формируем данные сделки
+                    trade_data = {
+                        "symbol": best_signal.symbol,
+                        "direction": best_signal.direction,
+                        "entry_price": str(best_signal.entry_price),
+                        "exit_price": str(best_signal.take_profit),
+                        "stop_loss": str(best_signal.stop_loss)
+                    }
+                    
+                    # Добавляем в таблицу
+                    success = self.add_trade_to_sheet(trade_data)
+                    
+                    if success:
+                        message = f"""✅ ЛУЧШИЙ СИГНАЛ ДОБАВЛЕН!
+
+🪙 Символ: {best_signal.symbol}
+📈 Направление: {best_signal.direction}
+💵 Цена входа: {best_signal.entry_price:.6f}
+💰 Take Profit: {best_signal.take_profit:.6f}
+🛑 Stop Loss: {best_signal.stop_loss:.6f}
+📊 Уверенность: {best_signal.confidence*100:.1f}%
+🎯 Стратегия: {best_signal.strategy}
+💡 Обоснование: {best_signal.reasoning}
+
+Сделка успешно добавлена в Google таблицу!"""
+                    else:
+                        message = "❌ Ошибка добавления сигнала в таблицу"
+                    
+                    return self.send_message(message)
+                    
+                except Exception as e:
+                    self.logger.error(f"❌ Ошибка добавления лучшего сигнала для {symbol}: {e}")
+                    return self.send_message(f"❌ Ошибка добавления сигнала: {e}")
             
             elif callback_data == "status":
                 # Отправляем статус бота
@@ -311,6 +552,39 @@ class TelegramBot:
                     "last_check": datetime.now().strftime("%H:%M:%S")
                 }
                 return self.send_status(status_data)
+            
+            elif callback_data == "testnet_status":
+                # Отправляем статус тестовой сети
+                try:
+                    if hasattr(self, 'signal_processor') and self.signal_processor:
+                        self.signal_processor.send_testnet_status()
+                        return True
+                    else:
+                        return self.send_message("❌ Процессор сигналов не инициализирован")
+                except Exception as e:
+                    self.logger.error(f"❌ Ошибка получения статуса тестовой сети: {e}")
+                    return self.send_message(f"❌ Ошибка: {e}")
+            
+            elif callback_data == "balance":
+                # Отправляем баланс аккаунта
+                try:
+                    if hasattr(self, 'signal_processor') and self.signal_processor:
+                        balance = self.signal_processor.bybit.get_balance()
+                        if balance:
+                            message = f"💰 БАЛАНС ТЕСТОВОГО АККАУНТА\n\n"
+                            message += f"💵 Общий баланс: {balance.get('totalWalletBalance', 'N/A')} USDT\n"
+                            message += f"💸 Доступно: {balance.get('availableToWithdraw', 'N/A')} USDT\n"
+                            message += f"📊 Закреплено: {balance.get('totalPnl', 'N/A')} USDT\n"
+                            message += f"⏰ Время: {datetime.now().strftime('%H:%M:%S')}"
+                        else:
+                            message = "❌ Не удалось получить баланс"
+                        
+                        return self.send_message(message)
+                    else:
+                        return self.send_message("❌ Процессор сигналов не инициализирован")
+                except Exception as e:
+                    self.logger.error(f"❌ Ошибка получения баланса: {e}")
+                    return self.send_message(f"❌ Ошибка: {e}")
             
             elif callback_data.startswith("symbol_"):
                 symbol = callback_data.replace("symbol_", "")

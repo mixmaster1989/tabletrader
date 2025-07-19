@@ -16,6 +16,7 @@ from signal_processor import SignalProcessor
 from telegram_bot import TelegramBot
 from bybit_api import BybitAPI
 from google_sheets_api import GoogleSheetsAPI
+from market_analyzer import MarketAnalyzer
 # from telegram_webhook import create_webhook_server  # Удалено
 import threading
 
@@ -26,6 +27,7 @@ class GoogleSignalsBot:
         self.telegram = None
         self.bybit_api = None
         self.google_sheets_api = None
+        self.market_analyzer = None
         self.running = False
         self.logger = logging.getLogger(__name__)
         self.polling_thread = None
@@ -60,28 +62,47 @@ class GoogleSignalsBot:
             
             # Загружаем конфигурацию
             self.config = load_config()
+            
+            # Логируем настройки сразу после загрузки
+            self.logger.info(f"🔧 Настройки Bybit из конфига:")
+            self.logger.info(f"   - API Key: {self.config.get('BYBIT_API_KEY', 'НЕ УСТАНОВЛЕН')[:10] if self.config.get('BYBIT_API_KEY') else 'НЕ УСТАНОВЛЕН'}...")
+            self.logger.info(f"   - Testnet: {self.config.get('BYBIT_TESTNET', 'НЕ УСТАНОВЛЕН')}")
+            self.logger.info(f"   - Google Sheets ID: {self.config.get('GOOGLE_SHEETS_ID', 'НЕ УСТАНОВЛЕН')}")
+            
             validate_config(self.config)
             
             # Пересоздаем логирование с правильной конфигурацией
             self._setup_logging()
             
-            # Инициализируем компоненты
-            self.telegram = TelegramBot(
-                self.config['TELEGRAM_BOT_TOKEN'],
-                self.config['TELEGRAM_CHAT_ID'],
-                google_sheets_api=self.google_sheets_api  # Передаем для добавления сделок
-            )
+            # Инициализируем компоненты в правильном порядке
+            testnet_mode = self.config.get('BYBIT_TESTNET', True)  # По умолчанию тестовая сеть
+            
+            self.logger.info(f"🔧 Настройки Bybit:")
+            self.logger.info(f"   - API Key: {self.config['BYBIT_API_KEY'][:10]}...")
+            self.logger.info(f"   - Testnet: {testnet_mode}")
+            
+            if testnet_mode:
+                self.logger.info("🎯 РЕЖИМ ТЕСТОВОЙ СЕТИ АКТИВИРОВАН")
+                self.logger.info("💰 Торговля будет осуществляться на демо-счете")
+            else:
+                self.logger.info("⚠️ РЕАЛЬНЫЙ РЕЖИМ - БУДЬТЕ ОСТОРОЖНЫ!")
             
             self.bybit_api = BybitAPI(
                 api_key=self.config['BYBIT_API_KEY'],
                 api_secret=self.config['BYBIT_API_SECRET'],
-                testnet=self.config.get('BYBIT_TESTNET', False)
+                testnet=testnet_mode
             )
             
             self.google_sheets_api = GoogleSheetsAPI(
                 credentials_file=self.config['GOOGLE_CREDENTIALS_FILE'],
-                spreadsheet_id=self.config['GOOGLE_SPREADSHEET_ID'],
+                spreadsheet_id=self.config['GOOGLE_SHEETS_ID'],
                 bybit_api=self.bybit_api
+            )
+            
+            self.telegram = TelegramBot(
+                self.config['TELEGRAM_BOT_TOKEN'],
+                self.config['TELEGRAM_CHAT_ID'],
+                google_sheets_api=self.google_sheets_api  # Передаем для добавления сделок
             )
             
             self.signal_processor = SignalProcessor(
@@ -91,8 +112,17 @@ class GoogleSignalsBot:
                 logger=self.logger
             )
             
+            # Передаем signal_processor в Telegram бот для доступа к функциям тестовой сети
+            self.telegram.signal_processor = self.signal_processor
+            
             # Передаем конфигурацию в signal_processor
             self.signal_processor.config = self.config
+            
+            # Инициализируем анализатор рынка
+            self.market_analyzer = MarketAnalyzer(self.bybit_api)
+            
+            # Передаем анализатор рынка в Telegram бот
+            self.telegram.market_analyzer = self.market_analyzer
             
             # Инициализируем веб-хук сервер для Telegram
             # self.webhook_server = create_webhook_server(self.telegram, port=5000) # Удалено
@@ -128,7 +158,16 @@ class GoogleSignalsBot:
         try:
             balance = self.bybit_api.get_balance()
             if balance:
-                self.logger.info("✅ Bybit API подключен")
+                if self.config.get('BYBIT_TESTNET', True):
+                    self.logger.info("✅ Bybit Testnet API подключен")
+                    self.logger.info(f"💰 Тестовый баланс: {balance.get('totalWalletBalance', 'N/A')} USDT")
+                    
+                    # Получаем информацию об аккаунте
+                    account_info = self.bybit_api.get_account_info()
+                    if account_info:
+                        self.logger.info(f"🏦 Тип аккаунта: {account_info.get('accountType', 'N/A')}")
+                else:
+                    self.logger.info("✅ Bybit Mainnet API подключен")
             else:
                 raise Exception("Не удалось получить баланс Bybit")
         except Exception as e:
@@ -145,7 +184,14 @@ class GoogleSignalsBot:
         """Запуск бота"""
         try:
             self.logger.info("🚀 Запуск Google Signals Bot...")
-            self.telegram.send_message("🚀 Google Signals Bot запущен!")
+            
+            # Отправляем сообщение о запуске с информацией о режиме
+            if self.config.get('BYBIT_TESTNET', True):
+                startup_message = "🚀 Google Signals Bot запущен в ТЕСТОВОМ РЕЖИМЕ! 🎯\n💰 Торговля на демо-счете Bybit"
+            else:
+                startup_message = "🚀 Google Signals Bot запущен в РЕАЛЬНОМ РЕЖИМЕ! ⚠️\n💸 Торговля на реальном счете Bybit"
+            
+            self.telegram.send_message(startup_message)
 
             # Запускаем polling-цикл Telegram в отдельном потоке
             self.polling_thread = threading.Thread(target=self.telegram.run_polling, daemon=True)
@@ -170,6 +216,14 @@ class GoogleSignalsBot:
                     # Анализируем паттерны каждые 20 циклов
                     if self.signal_processor.cycle_count % 20 == 0:
                         self.signal_processor.analyze_trading_patterns()
+                    
+                    # Мониторим позиции каждые 5 циклов
+                    if self.signal_processor.cycle_count % 5 == 0:
+                        self.signal_processor.monitor_positions()
+                    
+                    # Отправляем статус тестовой сети каждые 30 циклов
+                    if self.signal_processor.cycle_count % 30 == 0:
+                        self.signal_processor.send_testnet_status()
                     
                     # Логируем статус
                     self.logger.info(f"🔄 Цикл {self.signal_processor.cycle_count} завершен")

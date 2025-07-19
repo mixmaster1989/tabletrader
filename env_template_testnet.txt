@@ -1,0 +1,27 @@
+# Bybit API (ТЕСТОВАЯ СЕТЬ)
+BYBIT_API_KEY=your_testnet_api_key_here
+BYBIT_API_SECRET=your_testnet_api_secret_here
+BYBIT_TESTNET=true
+
+# Google Sheets
+GOOGLE_SHEETS_ID=1Vg-Za-flAc7kI77Emh6Rft-8gZT2spIqnzPoFniedZI
+GOOGLE_SHEET_NAME=Trades
+GOOGLE_CREDENTIALS_FILE=credentials.json
+
+# Telegram Bot
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+TELEGRAM_CHAT_ID=your_telegram_chat_id_here
+
+# Настройки торговли (ДЕМО-СЧЕТ)
+TRADE_MODE=trade
+DEFAULT_LEVERAGE=10
+DEFAULT_POSITION_SIZE=0.01
+MAX_POSITIONS=3
+PRICE_DEVIATION=0.5
+
+# Настройки мониторинга
+CHECK_INTERVAL=30
+
+# Логирование
+LOG_LEVEL=INFO
+LOG_FILE=./google_signals_bot.log 
