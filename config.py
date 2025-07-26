@@ -29,7 +29,7 @@ def load_config():
         
         # Настройки торговли
         'DEFAULT_LEVERAGE': int(os.getenv('DEFAULT_LEVERAGE', '20')),
-        'DEFAULT_POSITION_SIZE': float(os.getenv('DEFAULT_POSITION_SIZE', '0.01')),
+        'DEFAULT_POSITION_SIZE': float(os.getenv('DEFAULT_POSITION_SIZE', '1')),
         'MAX_POSITIONS': int(os.getenv('MAX_POSITIONS', '3')),
         
         # Настройки мониторинга

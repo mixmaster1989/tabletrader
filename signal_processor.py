@@ -21,7 +21,9 @@ class SignalProcessor:
         # Инициализация компонентов
         self.google_sheets = GoogleSheetsAPI(
             config['GOOGLE_CREDENTIALS_FILE'],
-            config['GOOGLE_SHEETS_ID']
+            config['GOOGLE_SHEETS_ID'],
+            float(config["DEFAULT_POSITION_SIZE"]),
+            int(config["DEFAULT_LEVERAGE"]),
         )
         
         self.bybit = BybitAPI(
@@ -36,7 +38,7 @@ class SignalProcessor:
         )
         
         # Отслеживание обработанных сигналов
-        self.processed_signals = set()
+        self.processed_signals = dict()
         self.last_check_time = None
         
         self.logger.info("✅ SignalProcessor инициализирован")
@@ -44,6 +46,13 @@ class SignalProcessor:
     def process_signals(self) -> Dict:
         """Основной метод обработки сигналов"""
         try:
+            positions = self.bybit.get_positions()
+            if positions:
+                self.logger.info(f"📊 Открыто {len(positions)} позиций")
+
+            for pos in positions:
+                self.logger.info(f"📊 Позиция: {pos['symbol']} {pos['side']} {pos['size']} USDT")
+
             # Читаем сигналы из Google таблицы
             signals = self.google_sheets.read_signals()
             
@@ -53,28 +62,62 @@ class SignalProcessor:
             
             processed_count = 0
             error_count = 0
-            
+
             for signal in signals:
                 try:
                     # Проверяем, не обработан ли уже сигнал
                     signal_id = f"{signal['symbol']}_{signal['row']}"
-                    if signal_id in self.processed_signals:
+                    if signal_id in self.processed_signals and self.processed_signals[signal_id]['processed']:
+                        processed_signal = self.processed_signals[signal_id]
+                        # Проверяем, изменились ли TP или SL
+                        if signal['take_profit'] != processed_signal['take_profit'] or \
+                           signal['stop_loss'] != processed_signal['stop_loss']:
+                            try:
+                                self.logger.info(f"📝 Обнаружено изменение TP/SL для {signal['symbol']}. Обновление ордера...")
+                                update_params = {
+                                    'symbol': signal['symbol'],
+                                    'take_profit': signal['take_profit'],
+                                    'stop_loss': signal['stop_loss']
+                                }
+                                update_result = self.bybit.modify_trading_stop(update_params)
+                                if update_result['success']:
+                                    # Обновляем сохраненные данные
+                                    self.processed_signals[signal_id]['take_profit'] = signal['take_profit']
+                                    self.processed_signals[signal_id]['stop_loss'] = signal['stop_loss']
+                                    self.logger.info(f"✅ TP/SL для {signal['symbol']} успешно обновлен.")
+                                else:
+                                    self.logger.error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {update_result['error']}")
+                            except Exception as e:
+                                self.logger.error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {e}")
                         continue
+
+                    usdtSize = signal['size']
+
+                    current_price = self.bybit.get_last_price(signal['symbol'])
+
+                    posSize = self.bybit.calculate_position_size(signal['symbol'], usdtSize,current_price)
                     
                     # Проверяем возможность входа
                     if self._can_enter_position(signal):
                         # Выполняем вход в позицию
-                        result = self._execute_signal(signal)
+                        result = self._execute_signal(signal, posSize)
                         
                         if result['success']:
-                            self.processed_signals.add(signal_id)
+                            self.processed_signals[signal_id] = {
+                                "processed": True,
+                                "order_id": result.get('order_id'),
+                                "tp_order_id": result.get('tp_order_id'),
+                                "sl_order_id": result.get('sl_order_id'),
+                                "take_profit": signal['take_profit'],
+                                "stop_loss": signal['stop_loss'],
+                            }
                             processed_count += 1
                             
                             # Отправляем уведомление
-                            self._send_notification(signal, result)
+                            self._send_notification(signal, {**result, 'usdt': usdtSize})
                             
                             # Отмечаем как обработанный
-                            self.google_sheets.mark_signal_processed(signal['row'])
+                            # self.google_sheets.mark_signal_processed(signal['row'])
                         else:
                             error_count += 1
                             self.logger.error(f"❌ Ошибка выполнения сигнала: {result['error']}")
@@ -100,15 +143,10 @@ class SignalProcessor:
     def _can_enter_position(self, signal: Dict) -> bool:
         """Проверка возможности входа в позицию"""
         try:
-            # Проверяем количество открытых позиций
             positions = self.bybit.get_positions()
-            if len(positions) >= self.config['MAX_POSITIONS']:
-                self.logger.warning(f"⚠️ Достигнут лимит позиций ({self.config['MAX_POSITIONS']})")
-                return False
-            
             # Проверяем, нет ли уже позиции по этой монете
             for pos in positions:
-                if pos.get('symbol') == signal['symbol']:
+                if pos.get('symbol') == signal['symbol'] + 'USDT':
                     self.logger.info(f"⏸️ Позиция по {signal['symbol']} уже открыта")
                     return False
             
@@ -118,27 +156,20 @@ class SignalProcessor:
                 self.logger.error(f"❌ Не удалось получить цену для {signal['symbol']}")
                 return False
             
-            # Проверяем отклонение цены от сигнала
-            price_deviation = abs(current_price - signal['entry_price']) / signal['entry_price'] * 100
-            if price_deviation > self.config['PRICE_DEVIATION']:
-                self.logger.warning(f"⚠️ Цена {signal['symbol']} отклонена на {price_deviation:.2f}%")
-                return False
-            
             return True
             
         except Exception as e:
             self.logger.error(f"❌ Ошибка проверки возможности входа: {e}")
             return False
     
-    def _execute_signal(self, signal: Dict) -> Dict:
+    def _execute_signal(self, signal: Dict, posSize: float) -> Dict:
         """Выполнение торгового сигнала"""
         try:
-            # Подготавливаем параметры ордера
             order_params = {
                 'symbol': signal['symbol'],
                 'side': signal['direction'],
-                'size': self.config['DEFAULT_POSITION_SIZE'],
-                'leverage': self.config['DEFAULT_LEVERAGE'],
+                'size': posSize,
+                'leverage': signal['leverage'],
                 'take_profit': signal['take_profit'],
                 'stop_loss': signal['stop_loss']
             }
@@ -146,17 +177,19 @@ class SignalProcessor:
             # Открываем позицию
             result = self.bybit.open_order_with_tp_sl(order_params)
             
-            if result.get('retCode') == 0:
+            if result.get('success'):
                 return {
                     'success': True,
-                    'order_id': result.get('result', {}).get('orderId'),
-                    'price': result.get('result', {}).get('avgPrice'),
+                    'order_id': result.get('orderId'),
+                    'tp_order_id': result.get('tpOrderId'),
+                    'sl_order_id': result.get('slOrderId'),
+                    'price': result.get('avgPrice'),
                     'size': order_params['size']
                 }
             else:
                 return {
                     'success': False,
-                    'error': result.get('retMsg', 'Unknown error')
+                    'error': result.get('error', 'Unknown error')
                 }
                 
         except Exception as e:
@@ -172,10 +205,11 @@ class SignalProcessor:
 
 📊 Монета: {signal['symbol']}
 📈 Направление: {signal['direction']}
-💰 Цена входа: {signal['entry_price']}
+💰 Цена входа: {signal['entry_price']}$
 📏 Размер: {result['size']}
-🎯 Take Profit: {signal['take_profit']}
-🛑 Stop Loss: {signal['stop_loss']}
+📏 Размер (USDT): {result['usdt']}$
+🎯 Take Profit: {signal['take_profit']}$
+🛑 Stop Loss: {signal['stop_loss']}$
 
 ✅ Статус: Успешно
 🆔 Order ID: {result.get('order_id', 'N/A')}

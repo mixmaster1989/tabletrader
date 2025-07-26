@@ -5,6 +5,7 @@
 Google Sheets API для чтения торговых сигналов
 """
 
+from datetime import datetime, timedelta
 import logging
 from typing import List, Dict, Optional
 from google.oauth2.service_account import Credentials
@@ -13,7 +14,7 @@ from googleapiclient.errors import HttpError
 import time
 
 class GoogleSheetsAPI:
-    def __init__(self, credentials_file: str, spreadsheet_id: str):
+    def __init__(self, credentials_file: str, spreadsheet_id: str, pos_size: float, leverage: int):
         self.credentials_file = credentials_file
         self.spreadsheet_id = spreadsheet_id
         self.service = None
@@ -23,6 +24,8 @@ class GoogleSheetsAPI:
         self.SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
         
         self._initialize_service()
+        self.pos_size = pos_size
+        self.leverage = leverage    
     
     def _initialize_service(self):
         """Инициализация Google Sheets API"""
@@ -36,16 +39,23 @@ class GoogleSheetsAPI:
             self.logger.error(f"❌ Ошибка инициализации Google Sheets API: {e}")
             raise
     
-    def read_signals(self, range_name: str = "A:E") -> List[Dict]:
+    def read_signals(self, range_name: str = "B:M") -> List[Dict]:
         """
         Читать сигналы из Google таблицы
         
         Ожидаемые колонки:
-        A - Монета (BTCUSDT)
-        B - Цена входа (50000)
-        C - Take Profit (52000)
-        D - Stop Loss (48000)
-        E - Направление (LONG/SHORT)
+        B - Время входа
+        C - Символ
+        D - Цена входа
+        E - Сторона
+        F - Цена выхода
+        G - Плечо
+        H - Цена стоп лоса
+        I - Размер
+        J - Прибыль
+        K - Дата выхода
+        L - Тейк в процентах
+        M - Стоп в процентах
         """
         try:
             result = self.service.spreadsheets().values().get(
@@ -62,24 +72,35 @@ class GoogleSheetsAPI:
             signals = []
             for i, row in enumerate(values[1:], start=2):  # Пропускаем заголовок
                 try:
-                    if len(row) >= 5:  # Минимум 5 колонок
+                    if len(row) >= 8:
+                        date_format = "%d.%m.%Y %H:%M"
+                        parsed_date = datetime.strptime(row[0].strip(), date_format)
+                        if parsed_date <= datetime.now() - timedelta(minutes=20):
+                            self.logger.warning(f"⚠️ Сигнал в строке {i} уже прошел")
+                            continue
                         signal = {
                             'row': i,
-                            'symbol': row[0].strip().upper(),
-                            'entry_price': float(row[1]),
-                            'take_profit': float(row[2]),
-                            'stop_loss': float(row[3]),
-                            'direction': row[4].strip().upper(),
+                            'date': parsed_date,
+                            'symbol': row[1].strip().upper(),
+                            'entry_price': float(row[2]),
+                            'direction': row[3].strip().upper(),
+                            'take_profit': float(row[4]),
+                            'leverage': self.leverage,
+                            'stop_loss': float(row[6]),
+                            'size': self.pos_size,
                             'status': 'new'  # Статус для отслеживания
                         }
                         
                         # Валидация сигнала
-                        if self._validate_signal(signal):
+                        error = self._validate_signal(signal)
+
+                        if error == "":
                             signals.append(signal)
                         else:
-                            self.logger.warning(f"⚠️ Невалидный сигнал в строке {i}: {row}")
+                            self.logger.warning(f"⚠️ Невалидный сигнал в строке {i}: signal: {signal} raw: {row}")
+                            self.logger.warning(f"⚠️ Ошибка валидации сигнала: {error}")
                     else:
-                        self.logger.warning(f"⚠️ Неполная строка {i}: {row}")
+                        self.logger.warning(f"⚠️ Неполная строка {i}: raw: {row}")
                         
                 except (ValueError, IndexError) as e:
                     self.logger.error(f"❌ Ошибка обработки строки {i}: {e}")
@@ -95,42 +116,70 @@ class GoogleSheetsAPI:
             self.logger.error(f"❌ Неожиданная ошибка: {e}")
             return []
     
-    def _validate_signal(self, signal: Dict) -> bool:
-        """Валидация торгового сигнала"""
+    def _validate_signal(self, signal: Dict) -> str:
+        """
+        Валидация торгового сигнала
+        
+        :param signal: Словарь с данными сигнала
+        {
+            'row': int,
+            'date': datetime,
+            'symbol': str,
+            'entry_price': float,
+            'direction': str,
+            'take_profit': float,
+            'leverage': int,
+            'stop_loss': float,
+            'size': float,
+            'status': str
+        }
+        """
         try:
             # Проверка символа
-            if not signal['symbol'] or len(signal['symbol']) < 3:
-                return False
-            
-            # Проверка цен
+            if type(signal['row']) != int:
+                return "Номер строки должен быть целым числом"
+
+            if type(signal['date']) != datetime:
+                return "Дата входа должна быть datetime"
+
+            if type(signal['symbol']) != str:
+                return "Символ должен быть строкой"
+            if len(signal['symbol']) < 3:
+                return "Символ должен быть не менее 3 символов"
+
+            if type(signal['entry_price']) != float:
+                return "Цена входа должна быть числом"
             if signal['entry_price'] <= 0:
-                return False
-            if signal['take_profit'] <= 0:
-                return False
-            if signal['stop_loss'] <= 0:
-                return False
-            
-            # Проверка направления
+                return "Цена входа должна быть больше 0"
+
             if signal['direction'] not in ['LONG', 'SHORT']:
-                return False
-            
-            # Проверка логики TP/SL
-            if signal['direction'] == 'LONG':
-                if signal['take_profit'] <= signal['entry_price']:
-                    return False
-                if signal['stop_loss'] >= signal['entry_price']:
-                    return False
-            else:  # SHORT
-                if signal['take_profit'] >= signal['entry_price']:
-                    return False
-                if signal['stop_loss'] <= signal['entry_price']:
-                    return False
-            
-            return True
+                return "Направление должно быть LONG или SHORT"
+
+            if type(signal['take_profit']) != float:
+                return "Take Profit должна быть числом"
+            if signal['take_profit'] <= 0:
+                return "Take Profit должна быть больше 0"
+
+            if type(signal['leverage']) != int:
+                return "Плечо должно быть целым числом"
+            if signal['leverage'] <= 0:
+                return "Плечо должно быть больше 0"
+
+            if type(signal['stop_loss']) != float:
+                return "Stop Loss должна быть числом"
+            if signal['stop_loss'] <= 0:
+                return "Stop Loss должна быть больше 0"
+
+            if type(signal['size']) != float:
+                return "Размер должен быть числом"
+            if signal['size'] <= 0:
+                return "Размер должен быть больше 0"
+
+            return ""
             
         except Exception as e:
             self.logger.error(f"❌ Ошибка валидации сигнала: {e}")
-            return False
+            return "Ошибка валидации сигнала"
     
     def mark_signal_processed(self, row: int, status: str = "processed"):
         """Отметить сигнал как обработанный (опционально)"""
