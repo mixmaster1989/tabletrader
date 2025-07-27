@@ -9,9 +9,11 @@ import logging
 import time
 from typing import List, Dict, Optional
 from datetime import datetime
+from binance_api import BinanceAPI
 from google_sheets_api import GoogleSheetsAPI
 from bybit_api import BybitAPI
 from telegram_bot import TelegramBot
+from okx_api import OKXAPI
 
 class SignalProcessor:
     def __init__(self, config: Dict):
@@ -26,10 +28,11 @@ class SignalProcessor:
             int(config["DEFAULT_LEVERAGE"]),
         )
         
-        self.bybit = BybitAPI(
-            config['BYBIT_API_KEY'],
-            config['BYBIT_API_SECRET'],
-            config['BYBIT_TESTNET']
+        self.exchange = OKXAPI(
+            config['OKX_API_KEY'],
+            config['OKX_API_SECRET'],
+            config['OKX_PASSPHRASE'],
+            config['OKX_TESTNET']
         )
         
         self.telegram = TelegramBot(
@@ -46,7 +49,7 @@ class SignalProcessor:
     def process_signals(self) -> Dict:
         """Основной метод обработки сигналов"""
         try:
-            positions = self.bybit.get_positions()
+            positions = self.exchange.get_positions()
             if positions:
                 self.logger.info(f"📊 Открыто {len(positions)} позиций")
 
@@ -67,35 +70,35 @@ class SignalProcessor:
                 try:
                     # Проверяем, не обработан ли уже сигнал
                     signal_id = f"{signal['symbol']}_{signal['row']}"
-                    if signal_id in self.processed_signals and self.processed_signals[signal_id]['processed']:
-                        processed_signal = self.processed_signals[signal_id]
-                        # Проверяем, изменились ли TP или SL
-                        if signal['take_profit'] != processed_signal['take_profit'] or \
-                           signal['stop_loss'] != processed_signal['stop_loss']:
-                            try:
-                                self.logger.info(f"📝 Обнаружено изменение TP/SL для {signal['symbol']}. Обновление ордера...")
-                                update_params = {
-                                    'symbol': signal['symbol'],
-                                    'take_profit': signal['take_profit'],
-                                    'stop_loss': signal['stop_loss']
-                                }
-                                update_result = self.bybit.modify_trading_stop(update_params)
-                                if update_result['success']:
-                                    # Обновляем сохраненные данные
-                                    self.processed_signals[signal_id]['take_profit'] = signal['take_profit']
-                                    self.processed_signals[signal_id]['stop_loss'] = signal['stop_loss']
-                                    self.logger.info(f"✅ TP/SL для {signal['symbol']} успешно обновлен.")
-                                else:
-                                    self.logger.error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {update_result['error']}")
-                            except Exception as e:
-                                self.logger.error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {e}")
-                        continue
+                    # if signal_id in self.processed_signals and self.processed_signals[signal_id]['processed']:
+                    #     processed_signal = self.processed_signals[signal_id]
+                    #     # Проверяем, изменились ли TP или SL
+                    #     if signal['take_profit'] != processed_signal['take_profit'] or \
+                    #        signal['stop_loss'] != processed_signal['stop_loss']:
+                    #         try:
+                    #             self.logger.info(f"📝 Обнаружено изменение TP/SL для {signal['symbol']}. Обновление ордера...")
+                    #             update_params = {
+                    #                 'symbol': signal['symbol'],
+                    #                 'take_profit': signal['take_profit'],
+                    #                 'stop_loss': signal['stop_loss']
+                    #             }
+                    #             update_result = self.exchange.modify_trading_stop(update_params)
+                    #             if update_result['success']:
+                    #                 # Обновляем сохраненные данные
+                    #                 self.processed_signals[signal_id]['take_profit'] = signal['take_profit']
+                    #                 self.processed_signals[signal_id]['stop_loss'] = signal['stop_loss']
+                    #                 self.logger.info(f"✅ TP/SL для {signal['symbol']} успешно обновлен.")
+                    #             else:
+                    #                 self.logger.error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {update_result['error']}")
+                    #         except Exception as e:
+                    #             self.logger.error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {e}")
+                    #     continue
 
                     usdtSize = signal['size']
 
-                    current_price = self.bybit.get_last_price(signal['symbol'])
+                    current_price = self.exchange.get_last_price(signal['symbol'])
 
-                    posSize = self.bybit.calculate_position_size(signal['symbol'], usdtSize,current_price)
+                    posSize = self.exchange.calculate_position_size(signal['symbol'], usdtSize,current_price)
                     
                     # Проверяем возможность входа
                     if self._can_enter_position(signal):
@@ -143,7 +146,7 @@ class SignalProcessor:
     def _can_enter_position(self, signal: Dict) -> bool:
         """Проверка возможности входа в позицию"""
         try:
-            positions = self.bybit.get_positions()
+            positions = self.exchange.get_positions()
             # Проверяем, нет ли уже позиции по этой монете
             for pos in positions:
                 if pos.get('symbol') == signal['symbol'] + 'USDT':
@@ -151,7 +154,7 @@ class SignalProcessor:
                     return False
             
             # Проверяем цену входа
-            current_price = self.bybit.get_last_price(signal['symbol'])
+            current_price = self.exchange.get_last_price(signal['symbol'])
             if not current_price:
                 self.logger.error(f"❌ Не удалось получить цену для {signal['symbol']}")
                 return False
@@ -175,7 +178,7 @@ class SignalProcessor:
             }
             
             # Открываем позицию
-            result = self.bybit.open_order_with_tp_sl(order_params)
+            result = self.exchange.open_order_with_tp_sl(order_params)
             
             if result.get('success'):
                 return {
@@ -226,6 +229,6 @@ class SignalProcessor:
         return {
             'last_check': self.last_check_time.isoformat() if self.last_check_time else None,
             'processed_signals': len(self.processed_signals),
-            'open_positions': len(self.bybit.get_positions()),
+            'open_positions': len(self.exchange.get_positions()),
             'max_positions': self.config['MAX_POSITIONS']
         } 

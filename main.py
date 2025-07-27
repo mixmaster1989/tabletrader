@@ -88,7 +88,7 @@ class GoogleSignalsBot:
         
         # Тест Bybit
         try:
-            balance = self.signal_processor.bybit.get_balance()
+            balance = self.signal_processor.exchange.get_balance()
             if balance:
                 self.logger.info("Bybit API подключен. Баланс: {}".format(balance))
             else:

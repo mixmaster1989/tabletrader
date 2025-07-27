@@ -12,6 +12,7 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import time
+import json
 
 class GoogleSheetsAPI:
     def __init__(self, credentials_file: str, spreadsheet_id: str, pos_size: float, leverage: int):
@@ -62,6 +63,13 @@ class GoogleSheetsAPI:
                 spreadsheetId=self.spreadsheet_id,
                 range=range_name
             ).execute()
+
+            try:
+                with open('google_sheets_data.json', 'w', encoding='utf-8') as f:
+                    json.dump(result, f, ensure_ascii=False, indent=4)
+                self.logger.info("💾 Результат чтения таблицы сохранен в google_sheets_data.json")
+            except Exception as e:
+                self.logger.error(f"❌ Не удалось сохранить результат в файл: {e}")
             
             values = result.get('values', [])
             

@@ -147,74 +147,7 @@ class BybitAPI:
         except Exception as e:
             self.logger.error(f"❌ Ошибка открытия ордера: {e}")
             return {'retCode': 1, 'retMsg': str(e)}
-    
-    def _set_take_profit_stop_loss(self, symbol: str, side: str, size: str, tp: float, sl: float):
-        """Установить TP/SL"""
-        try:
-            tp_side = "Sell" if side == "Buy" else "Buy"
-            tp_result = self.session.place_order(
-                category="linear",
-                symbol=symbol,
-                side=tp_side,
-                orderType="Limit",
-                qty=size,
-                price=str(tp),
-                timeInForce="GTC",
-                takeProfit=str(tp)
-            )
 
-            sl_side = "Sell" if side == "Buy" else "Buy"
-            sl_result = self.session.place_order(
-                category="linear",
-                symbol=symbol,
-                side=sl_side,
-                orderType="Stop",
-                qty=size,
-                price=str(sl),
-                stopPrice=str(sl),
-                timeInForce="GTC",
-                stopLoss=str(sl)
-            )
-            
-            self.logger.info(f"✅ TP/SL установлены для {symbol}: TP={tp}, SL={sl}")
-            
-            return {tpOrderId: tp_result.get('result', {}).get('orderId'), slOrderId: sl_result.get('result', {}).get('orderId')}
-        except Exception as e:
-            self.logger.error(f"❌ Ошибка установки TP/SL: {e}")
-            return {'tpOrderId': None, 'slOrderId': None}
-    
-    def close_position(self, symbol: str, side: str = None) -> Dict:
-        """Закрыть позицию"""
-        try:
-            positions = self.get_positions(symbol)
-            
-            for pos in positions:
-                if pos.get('symbol') == symbol:
-                    pos_side = pos.get('side')
-                    pos_size = pos.get('size')
-                    
-                    if side is None or pos_side == side:
-                        close_side = "Sell" if pos_side == "Buy" else "Buy"
-                        
-                        result = self.session.place_order(
-                            category="linear",
-                            symbol=symbol,
-                            side=close_side,
-                            orderType="Market",
-                            qty=pos_size,
-                            timeInForce="GTC",
-                            reduceOnly=True
-                        )
-                        
-                        self.logger.info(f"✅ Позиция закрыта: {symbol}")
-                        return result
-            
-            return {'retCode': 1, 'retMsg': 'Position not found'}
-            
-        except Exception as e:
-            self.logger.error(f"❌ Ошибка закрытия позиции: {e}")
-            return {'retCode': 1, 'retMsg': str(e)}
-    
     def calculate_position_size(self, symbol: str, usdtSize: float,lastPrice: float) -> float:
         try:
             info = self.session.get_instruments_info(category='linear', symbol=symbol + 'USDT')

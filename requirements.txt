@@ -1,5 +1,14 @@
 # Google Signals Bot Requirements
 
+python-binance
+pybit
+python-okx
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+python-telegram-bot
+
+
 # Основные зависимости
 python-dotenv==1.0.0
 requests==2.31.0
@@ -16,3 +25,6 @@ google-oauth2-tool==0.0.1
 
 # Логирование и утилиты
 colorama==0.4.6 
+
+# Binance API
+python-binance==1.0.29
