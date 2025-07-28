@@ -11,9 +11,7 @@ from typing import List, Dict, Optional
 from datetime import datetime
 from binance_api import BinanceAPI
 from google_sheets_api import GoogleSheetsAPI
-from bybit_api import BybitAPI
 from telegram_bot import TelegramBot
-from okx_api import OKXAPI
 
 class SignalProcessor:
     def __init__(self, config: Dict):
@@ -28,11 +26,10 @@ class SignalProcessor:
             int(config["DEFAULT_LEVERAGE"]),
         )
         
-        self.exchange = OKXAPI(
-            config['OKX_API_KEY'],
-            config['OKX_API_SECRET'],
-            config['OKX_PASSPHRASE'],
-            config['OKX_TESTNET']
+        self.exchange = BinanceAPI(
+            config['BINANCE_API_KEY'],
+            config['BINANCE_API_SECRET'],
+            config['BINANCE_TESTNET']
         )
         
         self.telegram = TelegramBot(

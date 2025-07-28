@@ -195,11 +195,10 @@ class BinanceAPI:
         """Открыть фьючерсный ордер с TP/SL"""
         try:
             symbol_for_request = self._get_symbol_for_request(params['symbol'])
-            side = params['side'].upper() # LONG -> BUY, SHORT -> SELL
-            bybit_side_map = {"LONG": "BUY", "SHORT": "SELL"} # Сохраняем для совместимости с логикой Bybit
-            binance_side = bybit_side_map.get(params['side'], params['side'].upper())
+            side_map = {"LONG": "BUY", "SHORT": "SELL"} # Сохраняем для совместимости с логикой Bybit
+            binance_side = side_map.get(params['side'], params['side'].upper())
             size = params['size']
-            leverage = params['leverage']
+            leverage = int(params['leverage'])
             take_profit = params.get('take_profit') # Может быть None
             stop_loss = params.get('stop_loss')     # Может быть None
 
@@ -219,10 +218,9 @@ class BinanceAPI:
                 'symbol': symbol_for_request,
                 'side': binance_side,
                 'type': 'MARKET',
-                'quantity': str(size)
-                 # TP/SL могут быть добавлены напрямую, но лучше отдельно для надежности
-                 # 'takeProfit': str(take_profit) if take_profit else None,
-                 # 'stopLoss': str(stop_loss) if stop_loss else None
+                'quantity': str(size),
+                'takeProfit': str(take_profit) if take_profit else None,
+                'stopLoss': str(stop_loss) if stop_loss else None
             }
 
             order_result = self.client.futures_create_order(**order_params)
@@ -234,22 +232,22 @@ class BinanceAPI:
 
                 self.logger.info(f"✅ Ордер открыт: {symbol_for_request} {binance_side} {executed_qty} по средней цене {avg_price}. Order ID: {order_id}")
 
-                # 3. Устанавливаем TP/SL отдельно (более надежный способ)
-                # Создаем временный params для modify_trading_stop
-                tp_sl_params = {
-                    'symbol': params['symbol'], # Передаем исходный символ
-                     'take_profit': take_profit,
-                     'stop_loss': stop_loss
-                }
-                tp_sl_result = self.modify_trading_stop(tp_sl_params)
-                if not tp_sl_result.get('success'):
-                     self.logger.warning(f"⚠️ Ошибка при установке TP/SL после открытия ордера: {tp_sl_result.get('error')}")
+                # # 3. Устанавливаем TP/SL отдельно (более надежный способ)
+                # # Создаем временный params для modify_trading_stop
+                # tp_sl_params = {
+                #     'symbol': params['symbol'], # Передаем исходный символ
+                #      'take_profit': take_profit,
+                #      'stop_loss': stop_loss
+                # }
+                # tp_sl_result = self.modify_trading_stop(tp_sl_params)
+                # if not tp_sl_result.get('success'):
+                #      self.logger.warning(f"⚠️ Ошибка при установке TP/SL после открытия ордера: {tp_sl_result.get('error')}")
 
                 return {
                     "orderId": order_id,
                     'success': True,
-                    'tpOrderId': tp_sl_result.get('result', [{}])[0].get('orderId') if tp_sl_result.get('success') else None,
-                    'slOrderId': tp_sl_result.get('result', [{}])[-1].get('orderId') if tp_sl_result.get('success') and len(tp_sl_result.get('result', [])) > 1 else None,
+                    'tpOrderId': None,
+                    'slOrderId': None,
                     'avgPrice': avg_price
                 }
             else:
@@ -309,7 +307,7 @@ class BinanceAPI:
                       final_quantity = min_qty
 
             self.logger.info(f"✅ Размер позиции для {symbol_for_request}: {final_quantity} контрактов (на сумму ~{usdt_size} USDT при цене {last_price})")
-            return round(final_quantity, 8) # Округляем до 8 знаков для надежности перед отправкой
+            return final_quantity
 
         except BinanceAPIException as e:
             self.logger.error(f"❌ Ошибка Binance при расчете размера позиции для {symbol}: {e}")
