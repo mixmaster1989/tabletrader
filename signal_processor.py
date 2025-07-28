@@ -123,6 +123,7 @@ class SignalProcessor:
                         continue
 
                     usdtSize = self.exchange.get_balance() * 0.95 / int(self.config['MAX_POSITIONS'])
+                    signal['size'] = usdtSize
 
                     current_price = self.exchange.get_last_price(signal['symbol'])
 
