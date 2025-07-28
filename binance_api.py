@@ -277,6 +277,7 @@ class BinanceAPI:
             filters = {f['filterType']: f for f in symbol_info['filters']}
             lot_size_filter = filters.get('LOT_SIZE')
             min_notional_filter = filters.get('MIN_NOTIONAL')
+            print("LOT_SIZE:", lot_size_filter)
     
             if not lot_size_filter:
                 raise ValueError(f"Фильтр LOT_SIZE не найден для {symbol_for_request}")
