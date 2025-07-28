@@ -266,34 +266,36 @@ class BinanceAPI:
         """Рассчитать размер позиции в контрактах на основе суммы USDT и цены"""
         try:
             symbol_for_request = self._get_symbol_for_request(symbol)
-            
+
             # Получаем информацию о символе
             exchange_info = self.client.futures_exchange_info()
             symbol_info = next((s for s in exchange_info['symbols'] if s['symbol'] == symbol_for_request), None)
-    
+
+            print(symbol_info)
+
             if not symbol_info:
                 raise ValueError(f"Информация о символе {symbol_for_request} не найдена")
-    
+
             filters = {f['filterType']: f for f in symbol_info['filters']}
             lot_size_filter = filters.get('LOT_SIZE')
             min_notional_filter = filters.get('MIN_NOTIONAL')
-    
+
             if not lot_size_filter:
                 raise ValueError(f"Фильтр LOT_SIZE не найден для {symbol_for_request}")
-    
+
             step_size = float(lot_size_filter['stepSize'])
             min_qty = float(lot_size_filter['minQty'])
             contract_size = float(symbol_info.get('contractSize', 1.0))  # Важно!
-    
+
             # Рассчитываем количество контрактов
             quantity = usdt_size / (last_price * contract_size)
-    
+
             # Округляем вниз до step_size
             step_size_dec = Decimal(str(step_size))
             qty_dec = Decimal(str(quantity))
             quantity_rounded = qty_dec.quantize(step_size_dec, rounding=ROUND_DOWN)
             final_quantity = float(quantity_rounded)
-    
+
             # Проверка minQty
             if final_quantity < min_qty:
                 min_notional_required = min_qty * last_price * contract_size
@@ -306,7 +308,7 @@ class BinanceAPI:
                         f"Размер {final_quantity} < minQty {min_qty}, используем minQty."
                     )
                     final_quantity = min_qty
-    
+
             # Проверка MIN_NOTIONAL
             if min_notional_filter:
                 min_notional = float(min_notional_filter['notional'])
@@ -315,13 +317,13 @@ class BinanceAPI:
                     raise ValueError(
                         f"Стоимость позиции {notional_value:.2f} USDT < минимальной {min_notional} USDT"
                     )
-    
+
             self.logger.info(
                 f"✅ Размер позиции для {symbol_for_request}: {final_quantity} контрактов "
                 f"(~{usdt_size} USDT при цене {last_price})"
             )
             return final_quantity
-    
+
         except BinanceAPIException as e:
             self.logger.error(f"❌ Ошибка Binance при расчете размера позиции для {symbol}: {e}")
             return 0.0
