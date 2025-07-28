@@ -83,6 +83,10 @@ class GoogleSheetsAPI:
                     if len(row) >= 8:
                         date_format = "%d.%m.%Y %H:%M"
                         parsed_date = datetime.strptime(row[0].strip(), date_format)
+
+                        if row[10].strip() != "":
+                            continue
+
                         signal = {
                             'row': i,
                             'date': parsed_date,
