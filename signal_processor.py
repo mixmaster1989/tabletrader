@@ -55,10 +55,6 @@ class SignalProcessor:
             for pos in positions:
                 self.logger.info(f"📊 Позиция: {pos['symbol']} {pos['side']} {pos['size']} USDT")
 
-            if len(positions) >= int(self.config['MAX_POSITIONS']):
-                self.logger.info(f"📊 Открыто {len(positions)} позиций, больше максимального количества {self.config['MAX_POSITIONS']}")
-                return {'processed': 0, 'errors': 0}
-
             # Синхронизация состояния с биржей
             open_position_symbols = {p['symbol'] for p in positions}
             processed_ids_to_reset = []
@@ -120,6 +116,10 @@ class SignalProcessor:
                             except Exception as e:
                                 self.logger.error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {e}")
                                 self.telegram.send_error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}")
+                        continue
+
+                    if len(positions) >= int(self.config['MAX_POSITIONS']):
+                        self.logger.info(f"📊 Открыто {len(positions)} позиций, больше максимального количества {self.config['MAX_POSITIONS']}")
                         continue
 
                     if signal['date'] <= datetime.now() - timedelta(minutes=20):
