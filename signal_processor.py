@@ -55,6 +55,25 @@ class SignalProcessor:
             for pos in positions:
                 self.logger.info(f"📊 Позиция: {pos['symbol']} {pos['side']} {pos['size']} USDT")
 
+            # Синхронизация состояния с биржей
+            open_position_symbols = {p['symbol'] for p in positions}
+            processed_ids_to_reset = []
+
+            for signal_id, signal_data in self.processed_signals.items():
+                if signal_data.get('processed'):
+                    # Извлекаем символ из ID сигнала. Формат ID: f"{symbol}_{row}"
+                    symbol = signal_id.split('_')[0]
+                    # Символы на бирже обычно имеют формат 'BTCUSDT'
+                    position_symbol = symbol + 'USDT'
+                    
+                    if position_symbol not in open_position_symbols:
+                        self.logger.info(f"🔄 Позиция по сигналу {signal_id} закрыта на бирже. Сбрасываю статус.")
+                        processed_ids_to_reset.append(signal_id)
+
+            for signal_id in processed_ids_to_reset:
+                self.telegram.send_message(f"🔄 Позиция по сигналу {signal_id} закрыта на бирже.")
+                self.processed_signals[signal_id]['processed'] = False
+
             # Читаем сигналы из Google таблицы
             signals = self.google_sheets.read_signals()
             
@@ -69,28 +88,34 @@ class SignalProcessor:
                 try:
                     # Проверяем, не обработан ли уже сигнал
                     signal_id = f"{signal['symbol']}_{signal['row']}"
-                    if signal_id in self.processed_signals and self.processed_signals[signal_id]['processed']:
-                        # processed_signal = self.processed_signals[signal_id]
-                        # Проверяем, изменились ли TP или SL
-                        # if signal['take_profit'] != processed_signal['take_profit'] or \
-                        #    signal['stop_loss'] != processed_signal['stop_loss']:
-                        #     try:
-                        #         self.logger.info(f"📝 Обнаружено изменение TP/SL для {signal['symbol']}. Обновление ордера...")
-                        #         update_params = {
-                        #             'symbol': signal['symbol'],
-                        #             'take_profit': signal['take_profit'],
-                        #             'stop_loss': signal['stop_loss']
-                        #         }
-                        #         update_result = self.exchange.modify_trading_stop(update_params)
-                        #         if update_result['success']:
-                        #             # Обновляем сохраненные данные
-                        #             self.processed_signals[signal_id]['take_profit'] = signal['take_profit']
-                        #             self.processed_signals[signal_id]['stop_loss'] = signal['stop_loss']
-                        #             self.logger.info(f"✅ TP/SL для {signal['symbol']} успешно обновлен.")
-                        #         else:
-                        #             self.logger.error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {update_result['error']}")
-                        #     except Exception as e:
-                        #         self.logger.error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {e}")
+                    if signal_id in self.processed_signals:
+                        processed_signal = self.processed_signals[signal_id]
+                        # Если сигнал уже обработан и позиция открыта, пропускаем
+                        if not processed_signal['processed']:
+                            continue
+                        # Если сигнал уже обработан и позиция еще на бирже, но TP/SL изменились, обновляем
+                        if signal['take_profit'] != processed_signal['take_profit'] or \
+                           signal['stop_loss'] != processed_signal['stop_loss']:
+                            try:
+                                self.logger.info(f"📝 Обнаружено изменение TP/SL для {signal['symbol']}. Обновление ордера...")
+                                update_params = {
+                                    'symbol': signal['symbol'],
+                                    'take_profit': signal['take_profit'],
+                                    'stop_loss': signal['stop_loss']
+                                }
+                                update_result = self.exchange.modify_trading_stop(update_params)
+                                if update_result['success']:
+                                    # Обновляем сохраненные данные
+                                    self.processed_signals[signal_id]['take_profit'] = signal['take_profit']
+                                    self.processed_signals[signal_id]['stop_loss'] = signal['stop_loss']
+                                    self.logger.info(f"✅ TP/SL для {signal['symbol']} успешно обновлен.")
+                                    self.telegram.send_message(f"✅ TP/SL для {signal['symbol']} успешно обновлен.")
+                                else:
+                                    self.logger.error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {update_result['error']}")
+                                    self.telegram.send_error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}")
+                            except Exception as e:
+                                self.logger.error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {e}")
+                                self.telegram.send_error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}")
                         continue
 
                     usdtSize = signal['size']
@@ -245,8 +270,6 @@ class SignalProcessor:
 📊 Монета: {signal['symbol']}
 📈 Направление: {signal['direction']}
 💰 Цена входа: {signal['entry_price']}$
-📏 Размер: {result['size']}
-📏 Размер (USDT): {result['usdt']}$
 🎯 Take Profit: {signal['take_profit']}$
 🛑 Stop Loss: {signal['stop_loss']}$
 

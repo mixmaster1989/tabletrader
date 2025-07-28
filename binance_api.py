@@ -143,6 +143,10 @@ class BinanceAPI:
             open_orders = self.client.futures_get_open_orders(symbol=symbol_for_request)
             tp_sl_order_ids = [o['orderId'] for o in open_orders if o['type'] in ['TAKE_PROFIT_MARKET', 'STOP_MARKET']]
 
+            if len(tp_sl_order_ids) != 2:
+                self.logger.error(f"❌ Неверное количество TP/SL ордеров для {symbol_for_request}: {len(tp_sl_order_ids)}")
+                return {"success": False, "error": "Неверное количество TP/SL ордеров"}
+
             for order_id in tp_sl_order_ids:
                 try:
                     self.client.futures_cancel_order(symbol=symbol_for_request, orderId=order_id)
@@ -160,7 +164,7 @@ class BinanceAPI:
                     'type': 'TAKE_PROFIT_MARKET',
                     'stopPrice': str(take_profit),
                     'closePosition': True, # Закрыть всю позицию
-                     'workingType': 'MARK_PRICE' # Или 'CONTRACT_PRICE'
+                    'workingType': 'MARK_PRICE'
                 })
             if stop_loss:
                  orders_to_place.append({

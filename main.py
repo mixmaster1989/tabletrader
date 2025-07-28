@@ -74,8 +74,6 @@ class GoogleSignalsBot:
             
         except Exception as e:
             self.logger.error(f"Ошибка инициализации: {e}")
-            if self.telegram:
-                self.telegram.send_error(f"Ошибка инициализации: {e}")
             return False
     
     def _test_connections(self):
@@ -142,12 +140,10 @@ class GoogleSignalsBot:
                     break
                 except Exception as e:
                     self.logger.error(f"Ошибка в основном цикле: {e}")
-                    self.telegram.send_error(f"Ошибка в основном цикле: {e}")
                     time.sleep(30)  # Ждем 30 секунд перед повтором
             
         except Exception as e:
             self.logger.error(f"Критическая ошибка: {e}")
-            self.telegram.send_error(f"Критическая ошибка: {e}")
         finally:
             self.stop()
     
