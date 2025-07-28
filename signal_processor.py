@@ -67,29 +67,29 @@ class SignalProcessor:
                 try:
                     # Проверяем, не обработан ли уже сигнал
                     signal_id = f"{signal['symbol']}_{signal['row']}"
-                    # if signal_id in self.processed_signals and self.processed_signals[signal_id]['processed']:
-                    #     processed_signal = self.processed_signals[signal_id]
-                    #     # Проверяем, изменились ли TP или SL
-                    #     if signal['take_profit'] != processed_signal['take_profit'] or \
-                    #        signal['stop_loss'] != processed_signal['stop_loss']:
-                    #         try:
-                    #             self.logger.info(f"📝 Обнаружено изменение TP/SL для {signal['symbol']}. Обновление ордера...")
-                    #             update_params = {
-                    #                 'symbol': signal['symbol'],
-                    #                 'take_profit': signal['take_profit'],
-                    #                 'stop_loss': signal['stop_loss']
-                    #             }
-                    #             update_result = self.exchange.modify_trading_stop(update_params)
-                    #             if update_result['success']:
-                    #                 # Обновляем сохраненные данные
-                    #                 self.processed_signals[signal_id]['take_profit'] = signal['take_profit']
-                    #                 self.processed_signals[signal_id]['stop_loss'] = signal['stop_loss']
-                    #                 self.logger.info(f"✅ TP/SL для {signal['symbol']} успешно обновлен.")
-                    #             else:
-                    #                 self.logger.error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {update_result['error']}")
-                    #         except Exception as e:
-                    #             self.logger.error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {e}")
-                    #     continue
+                    if signal_id in self.processed_signals and self.processed_signals[signal_id]['processed']:
+                        # processed_signal = self.processed_signals[signal_id]
+                        # Проверяем, изменились ли TP или SL
+                        # if signal['take_profit'] != processed_signal['take_profit'] or \
+                        #    signal['stop_loss'] != processed_signal['stop_loss']:
+                        #     try:
+                        #         self.logger.info(f"📝 Обнаружено изменение TP/SL для {signal['symbol']}. Обновление ордера...")
+                        #         update_params = {
+                        #             'symbol': signal['symbol'],
+                        #             'take_profit': signal['take_profit'],
+                        #             'stop_loss': signal['stop_loss']
+                        #         }
+                        #         update_result = self.exchange.modify_trading_stop(update_params)
+                        #         if update_result['success']:
+                        #             # Обновляем сохраненные данные
+                        #             self.processed_signals[signal_id]['take_profit'] = signal['take_profit']
+                        #             self.processed_signals[signal_id]['stop_loss'] = signal['stop_loss']
+                        #             self.logger.info(f"✅ TP/SL для {signal['symbol']} успешно обновлен.")
+                        #         else:
+                        #             self.logger.error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {update_result['error']}")
+                        #     except Exception as e:
+                        #         self.logger.error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {e}")
+                        continue
 
                     usdtSize = signal['size']
 
@@ -99,6 +99,7 @@ class SignalProcessor:
                     
                     # Проверяем возможность входа
                     if self._can_enter_position(signal):
+                        print(signal)
                         # Выполняем вход в позицию
                         result = self._execute_signal(signal, posSize)
                         
@@ -144,6 +145,7 @@ class SignalProcessor:
         """Проверка возможности входа в позицию"""
         try:
             positions = self.exchange.get_positions()
+            print(positions)
             # Проверяем, нет ли уже позиции по этой монете
             for pos in positions:
                 if pos.get('symbol') == signal['symbol'] + 'USDT':
