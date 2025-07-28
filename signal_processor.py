@@ -122,6 +122,9 @@ class SignalProcessor:
                                 self.telegram.send_error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}")
                         continue
 
+                    if signal['date'] <= datetime.now() - timedelta(minutes=20):
+                        self.logger.warning(f"⚠️ Сигнал в строке {i} уже прошел")
+                        continue
                     usdtSize = self.exchange.get_balance() * 0.95 / int(self.config['MAX_POSITIONS'])
                     signal['size'] = usdtSize
 

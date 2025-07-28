@@ -83,9 +83,6 @@ class GoogleSheetsAPI:
                     if len(row) >= 8:
                         date_format = "%d.%m.%Y %H:%M"
                         parsed_date = datetime.strptime(row[0].strip(), date_format)
-                        if parsed_date <= datetime.now() - timedelta(minutes=20):
-                            self.logger.warning(f"⚠️ Сигнал в строке {i} уже прошел")
-                            continue
                         signal = {
                             'row': i,
                             'date': parsed_date,
