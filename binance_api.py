@@ -289,17 +289,19 @@ class BinanceAPI:
             # Рассчитываем количество контрактов
             quantity = usdt_size / (last_price * contract_size)
 
-            print(f"contractSize: {contract_size}")
-            print(f"last_price: {last_price}")
-            print(f"usdt_size: {usdt_size}")
-            print(f"raw quantity: {quantity}")
-            print(f"step_size: {step_size}")
     
             # Округляем вниз до step_size
             step_size_dec = Decimal(str(step_size))
             qty_dec = Decimal(str(quantity))
             quantity_rounded = qty_dec.quantize(step_size_dec, rounding=ROUND_DOWN)
             final_quantity = float(quantity_rounded)
+
+            print("🔧 DEBUG")
+            print("  qty_dec:", qty_dec)
+            print("  step_size_dec:", step_size_dec)
+            print("  step_size_dec.as_tuple():", step_size_dec.as_tuple())
+            print("  Выполняю: qty_dec.quantize(step_size_dec, rounding=ROUND_DOWN)")
+            print("  quantity_rounded:", quantity_rounded)
     
             # 🔴 Проверка: не обнулился ли объём?
             if final_quantity < step_size:
