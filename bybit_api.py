@@ -104,14 +104,12 @@ class BybitAPI:
     def open_order_with_tp_sl(self, params: Dict) -> Dict:
         """Открыть ордер с TP/SL"""
         try:
-            print(params['side'])
             bybitSide = "Buy" if params['side'] == "LONG" else "Sell"
             symbol = params['symbol'] + 'USDT'
             size = params['size']
             leverage = params['leverage']
             take_profit = params['take_profit']
             stop_loss = params['stop_loss']
-            print(leverage)
             # Устанавливаем плечо
             try:
                 self.session.set_leverage(

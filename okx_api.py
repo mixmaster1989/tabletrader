@@ -17,9 +17,6 @@ class OKXAPI:
         self.api_secret = api_secret
         self.passphrase = passphrase
         self.testnet = testnet
-        print(api_key)
-        print(api_secret)
-        print(passphrase)
         self.logger = logging.getLogger(__name__)
         
         # Инициализация API клиентов

@@ -26,7 +26,11 @@ class BinanceAPI:
 
         # Инициализация клиента Binance
         self.client = Client(api_key=api_key, api_secret=api_secret, testnet=testnet)
-        self.client.futures_change_position_mode(dualSidePosition=False)
+        try:
+            self.client.futures_change_position_mode(dualSidePosition=False)
+        except BinanceAPIException as e:
+            if e.code != -4059:
+                self.logger.warning(f"Не удалось установить режим позиции: {e}")
         self.logger.info(f"✅ Binance API инициализирован (testnet: {testnet})")
 
     def _get_symbol_for_request(self, symbol: str) -> str:
@@ -57,7 +61,6 @@ class BinanceAPI:
             open_positions = []
 
             for pos in all_positions:
-                print(pos)
                 # Проверяем, что позиция по USDT-Margined Futures и размер не нулевой
                 if pos['symbol'].endswith('USDT') and float(pos['positionAmt']) != 0:
                     if symbol is None or pos['symbol'] == self._get_symbol_for_request(symbol):
@@ -104,7 +107,6 @@ class BinanceAPI:
             self.logger.warning("Баланс USDT не найден")
             return {}
         except BinanceAPIException as e:
-            print(e)
             self.logger.error(f"❌ Ошибка получения баланса: {e}")
             return {}
         except Exception as e:

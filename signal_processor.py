@@ -7,6 +7,7 @@
 
 import logging
 import time
+import json
 from typing import List, Dict, Optional
 from datetime import datetime
 from binance_api import BinanceAPI
@@ -40,6 +41,7 @@ class SignalProcessor:
         # Отслеживание обработанных сигналов
         self.processed_signals = dict()
         self.last_check_time = None
+        self.executed_signals_file = 'executed_signals.json'
         
         self.logger.info("✅ SignalProcessor инициализирован")
     
@@ -99,7 +101,7 @@ class SignalProcessor:
                     
                     # Проверяем возможность входа
                     if self._can_enter_position(signal):
-                        print(signal)
+                        self._save_executed_signal(signal)
                         # Выполняем вход в позицию
                         result = self._execute_signal(signal, posSize)
                         
@@ -140,12 +142,37 @@ class SignalProcessor:
         except Exception as e:
             self.logger.error(f"❌ Ошибка обработки сигналов: {e}")
             return {'processed': 0, 'errors': 1}
+
+    def _save_executed_signal(self, signal: Dict):
+        """Сохраняет исполненный сигнал в JSON файл."""
+        try:
+            # Добавляем временную метку к сигналу
+            signal_to_save = signal.copy()
+            signal_to_save['execution_time'] = datetime.now().isoformat()
+
+            # Читаем существующие данные
+            try:
+                with open(self.executed_signals_file, 'r', encoding='utf-8') as f:
+                    signals_data = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
+                signals_data = []
+
+            # Добавляем новый сигнал
+            signals_data.append(signal_to_save)
+
+            # Записываем обратно в файл
+            with open(self.executed_signals_file, 'w', encoding='utf-8') as f:
+                json.dump(signals_data, f, ensure_ascii=False, indent=4)
+                
+            self.logger.info(f"💾 Сигнал для {signal['symbol']} сохранен в {self.executed_signals_file}")
+
+        except Exception as e:
+            self.logger.error(f"❌ Ошибка сохранения сигнала в файл: {e}")
     
     def _can_enter_position(self, signal: Dict) -> bool:
         """Проверка возможности входа в позицию"""
         try:
             positions = self.exchange.get_positions()
-            print(positions)
             # Проверяем, нет ли уже позиции по этой монете
             for pos in positions:
                 if pos.get('symbol') == signal['symbol'] + 'USDT':
