@@ -148,14 +148,6 @@ class BinanceAPI:
                 self.logger.error(f"❌ Неверное количество TP/SL ордеров для {symbol_for_request}: {len(tp_sl_order_ids)}")
                 return {"success": False, "error": "Неверное количество TP/SL ордеров"}
 
-            for order_id in tp_sl_order_ids:
-                try:
-                    self.client.futures_cancel_order(symbol=symbol_for_request, orderId=order_id)
-                    self.logger.debug(f"Отменен TP/SL ордер {order_id} для {symbol_for_request}")
-                except BinanceAPIException as e:
-                     # Может быть ошибка, если ордер уже исполнен или отменен, продолжаем
-                     self.logger.warning(f"Не удалось отменить ордер {order_id}: {e}")
-
             # 4. Установить новые TP/SL
             orders_to_place = []
             if take_profit:
@@ -188,6 +180,15 @@ class BinanceAPI:
                     # Возвращаем ошибку, если не удалось разместить один из ордеров?
                     # Или продолжаем и возвращаем частичный успех?
                     return {"success": False, "error": f"Ошибка размещения ордера: {e}"}
+
+            # Отменяем старые TP/SL
+            for order_id in tp_sl_order_ids:
+                try:
+                    self.client.futures_cancel_order(symbol=symbol_for_request, orderId=order_id)
+                    self.logger.debug(f"Отменен TP/SL ордер {order_id} для {symbol_for_request}")
+                except BinanceAPIException as e:
+                     # Может быть ошибка, если ордер уже исполнен или отменен, продолжаем
+                     self.logger.warning(f"Не удалось отменить ордер {order_id}: {e}")
 
             self.logger.info(f"✅ TP/SL для {symbol_for_request} успешно изменены/установлены.")
             return {"success": True, "result": placed_orders}
