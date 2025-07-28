@@ -277,31 +277,22 @@ class BinanceAPI:
             filters = {f['filterType']: f for f in symbol_info['filters']}
             lot_size_filter = filters.get('LOT_SIZE')
             min_notional_filter = filters.get('MIN_NOTIONAL')
-            print("LOT_SIZE:", lot_size_filter)
     
             if not lot_size_filter:
                 raise ValueError(f"Фильтр LOT_SIZE не найден для {symbol_for_request}")
     
-            step_size = float(lot_size_filter['stepSize'])
-            min_qty = float(lot_size_filter['minQty'])
-            contract_size = float(symbol_info.get('contractSize', 1.0))
+            step_size = Decimal(str(lot_size_filter['stepSize'])).normalize()
+            min_qty = Decimal(str(lot_size_filter['minQty'])).normalize()
+            contract_size = Decimal(str(symbol_info.get('contractSize', 1.0))).normalize()
     
             # Рассчитываем количество контрактов
             quantity = usdt_size / (last_price * contract_size)
 
     
             # Округляем вниз до step_size
-            step_size_dec = Decimal(str(step_size))
             qty_dec = Decimal(str(quantity))
-            quantity_rounded = qty_dec.quantize(step_size_dec, rounding=ROUND_DOWN)
+            quantity_rounded = qty_dec.quantize(step_size, rounding=ROUND_DOWN)
             final_quantity = float(quantity_rounded)
-
-            print("🔧 DEBUG")
-            print("  qty_dec:", qty_dec)
-            print("  step_size_dec:", step_size_dec)
-            print("  step_size_dec.as_tuple():", step_size_dec.as_tuple())
-            print("  Выполняю: qty_dec.quantize(step_size_dec, rounding=ROUND_DOWN)")
-            print("  quantity_rounded:", quantity_rounded)
     
             # 🔴 Проверка: не обнулился ли объём?
             if final_quantity < step_size:
@@ -340,7 +331,6 @@ class BinanceAPI:
                 f"✅ Размер позиции для {symbol_for_request}: {final_quantity} контрактов "
                 f"(~{usdt_size} USDT при цене {last_price})"
             )
-            print(f"rounded: {final_quantity}")
             return final_quantity
     
         except BinanceAPIException as e:
