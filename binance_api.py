@@ -56,6 +56,7 @@ class BinanceAPI:
             open_positions = []
 
             for pos in all_positions:
+                print(pos)
                 # Проверяем, что позиция по USDT-Margined Futures и размер не нулевой
                 if pos['symbol'].endswith('USDT') and float(pos['positionAmt']) != 0:
                     if symbol is None or pos['symbol'] == self._get_symbol_for_request(symbol):
