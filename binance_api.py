@@ -263,11 +263,9 @@ class BinanceAPI:
             return {'success': False, 'retCode': 1, 'retMsg': str(e)}
 
     def calculate_position_size(self, symbol: str, usdt_size: float, last_price: float) -> float:
-        """Рассчитать размер позиции в контрактах на основе суммы USDT и цены"""
         try:
             symbol_for_request = self._get_symbol_for_request(symbol)
     
-            # Получаем информацию о символе
             exchange_info = self.client.futures_exchange_info()
             symbol_info = next((s for s in exchange_info['symbols'] if s['symbol'] == symbol_for_request), None)
     
@@ -281,47 +279,51 @@ class BinanceAPI:
             if not lot_size_filter:
                 raise ValueError(f"Фильтр LOT_SIZE не найден для {symbol_for_request}")
     
-            step_size = Decimal(str(lot_size_filter['stepSize'])).normalize()
-            min_qty = Decimal(str(lot_size_filter['minQty'])).normalize()
-            contract_size = Decimal(str(symbol_info.get('contractSize', 1.0))).normalize()
+            # Используем строки из API для точности
+            step_size_str = lot_size_filter['stepSize']
+            min_qty_str = lot_size_filter['minQty']
+            contract_size_str = symbol_info.get('contractSize', '1')
     
-            # Рассчитываем количество контрактов
-            quantity = usdt_size / (last_price * contract_size)
-
+            step_size_dec = Decimal(step_size_str).normalize()
+            min_qty_dec = Decimal(min_qty_str).normalize()
+            contract_size_dec = Decimal(contract_size_str).normalize()
     
-            # Округляем вниз до step_size
-            qty_dec = Decimal(str(quantity))
-            quantity_rounded = qty_dec.quantize(step_size, rounding=ROUND_DOWN)
+            # Конвертируем входы в Decimal
+            usdt_size_dec = Decimal(str(usdt_size))
+            last_price_dec = Decimal(str(last_price))
+    
+            # Расчёт
+            quantity = usdt_size_dec / (last_price_dec * contract_size_dec)
+            quantity_rounded = quantity.quantize(step_size_dec, rounding=ROUND_DOWN)
             final_quantity = float(quantity_rounded)
     
             # 🔴 Проверка: не обнулился ли объём?
-            if final_quantity < step_size:
-                # Если даже не хватает на один шаг — слишком маленькая сумма
-                min_usdt_for_step = step_size * last_price * contract_size
+            if final_quantity < float(step_size_dec):
+                min_usdt_for_step = float(step_size_dec) * last_price * float(contract_size_dec)
                 if usdt_size < min_usdt_for_step:
                     raise ValueError(
                         f"Сумма {usdt_size} USDT слишком мала: нужно минимум ~{min_usdt_for_step:.2f} USDT "
-                        f"для минимального шага {step_size} контрактов при цене {last_price}"
+                        f"для минимального шага {step_size_dec} контрактов при цене {last_price}"
                     )
     
             # Проверка minQty
-            if final_quantity < min_qty:
-                min_usdt_for_min_qty = min_qty * last_price * contract_size
+            if final_quantity < float(min_qty_dec):
+                min_usdt_for_min_qty = float(min_qty_dec) * last_price * float(contract_size_dec)
                 if usdt_size < min_usdt_for_min_qty:
                     raise ValueError(
                         f"Сумма {usdt_size} USDT слишком мала: нужно минимум {min_usdt_for_min_qty:.2f} USDT "
-                        f"для минимального объёма {min_qty} контрактов"
+                        f"для минимального объёма {min_qty_dec} контрактов"
                     )
                 else:
                     self.logger.warning(
-                        f"Размер {final_quantity} < minQty {min_qty}, используем minQty."
+                        f"Размер {final_quantity} < minQty {min_qty_dec}, используем minQty."
                     )
-                    final_quantity = min_qty
+                    final_quantity = float(min_qty_dec)
     
             # Проверка MIN_NOTIONAL
             if min_notional_filter:
                 min_notional = float(min_notional_filter['notional'])
-                notional_value = final_quantity * last_price * contract_size
+                notional_value = final_quantity * last_price * float(contract_size_dec)
                 if notional_value < min_notional:
                     raise ValueError(
                         f"Стоимость позиции {notional_value:.2f} USDT < минимальной {min_notional} USDT"
