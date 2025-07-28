@@ -270,45 +270,58 @@ class BinanceAPI:
             # Получаем информацию о символе
             exchange_info = self.client.futures_exchange_info()
             symbol_info = next((s for s in exchange_info['symbols'] if s['symbol'] == symbol_for_request), None)
-
+    
             if not symbol_info:
                 raise ValueError(f"Информация о символе {symbol_for_request} не найдена")
-
+    
             filters = {f['filterType']: f for f in symbol_info['filters']}
             lot_size_filter = filters.get('LOT_SIZE')
-            min_notional_filter = filters.get('MIN_NOTIONAL') # Может не использоваться напрямую для расчета количества
-
+            min_notional_filter = filters.get('MIN_NOTIONAL')
+    
             if not lot_size_filter:
                 raise ValueError(f"Фильтр LOT_SIZE не найден для {symbol_for_request}")
-
+    
             step_size = float(lot_size_filter['stepSize'])
             min_qty = float(lot_size_filter['minQty'])
-
+            contract_size = float(symbol_info.get('contractSize', 1.0))  # Важно!
+    
             # Рассчитываем количество контрактов
-            # Размер = Сумма USDT / (Цена * Контрактный размер)
-            # Для большинства крипто-фьючерсов контрактный размер = 1, поэтому:
-            contract_size = 1.0 # Обычно 1 для крипты, но можно проверить в symbol_info['contractSize'] если есть
             quantity = usdt_size / (last_price * contract_size)
-
-            # Округляем вниз до разрешенного step_size
-            precision = int(round(-Decimal(str(step_size)).as_tuple().exponent, 0))
-            if precision < 0: # Если step_size целое число (например, 1)
-                 precision = 0
-            quantity_rounded = Decimal(str(quantity)).quantize(Decimal(str(step_size)), rounding=ROUND_DOWN)
+    
+            # Округляем вниз до step_size
+            step_size_dec = Decimal(str(step_size))
+            qty_dec = Decimal(str(quantity))
+            quantity_rounded = qty_dec.quantize(step_size_dec, rounding=ROUND_DOWN)
             final_quantity = float(quantity_rounded)
-
-            # Проверяем минимальный размер
+    
+            # Проверка minQty
             if final_quantity < min_qty:
-                 if usdt_size < min_qty * last_price * contract_size:
-                      raise ValueError(f"Сумма {usdt_size} USDT слишком мала для минимального ордера {min_qty} контрактов (примерно {min_qty * last_price * contract_size} USDT)")
-                 else:
-                      # Если сумма достаточна, но округление "обнулило" количество, используем min_qty
-                      self.logger.warning(f"Рассчитанный размер {final_quantity} меньше minQty {min_qty}, устанавливаю minQty.")
-                      final_quantity = min_qty
-
-            self.logger.info(f"✅ Размер позиции для {symbol_for_request}: {final_quantity} контрактов (на сумму ~{usdt_size} USDT при цене {last_price})")
+                min_notional_required = min_qty * last_price * contract_size
+                if usdt_size < min_notional_required:
+                    raise ValueError(
+                        f"Сумма {usdt_size} USDT слишком мала: нужно минимум {min_notional_required:.2f} USDT"
+                    )
+                else:
+                    self.logger.warning(
+                        f"Размер {final_quantity} < minQty {min_qty}, используем minQty."
+                    )
+                    final_quantity = min_qty
+    
+            # Проверка MIN_NOTIONAL
+            if min_notional_filter:
+                min_notional = float(min_notional_filter['notional'])
+                notional_value = final_quantity * last_price * contract_size
+                if notional_value < min_notional:
+                    raise ValueError(
+                        f"Стоимость позиции {notional_value:.2f} USDT < минимальной {min_notional} USDT"
+                    )
+    
+            self.logger.info(
+                f"✅ Размер позиции для {symbol_for_request}: {final_quantity} контрактов "
+                f"(~{usdt_size} USDT при цене {last_price})"
+            )
             return final_quantity
-
+    
         except BinanceAPIException as e:
             self.logger.error(f"❌ Ошибка Binance при расчете размера позиции для {symbol}: {e}")
             return 0.0
