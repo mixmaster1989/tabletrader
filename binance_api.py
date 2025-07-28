@@ -287,6 +287,12 @@ class BinanceAPI:
     
             # Рассчитываем количество контрактов
             quantity = usdt_size / (last_price * contract_size)
+
+            print(f"contractSize: {contract_size}")
+            print(f"last_price: {last_price}")
+            print(f"usdt_size: {usdt_size}")
+            print(f"raw quantity: {quantity}")
+            print(f"step_size: {step_size}")
     
             # Округляем вниз до step_size
             step_size_dec = Decimal(str(step_size))
@@ -331,6 +337,7 @@ class BinanceAPI:
                 f"✅ Размер позиции для {symbol_for_request}: {final_quantity} контрактов "
                 f"(~{usdt_size} USDT при цене {last_price})"
             )
+            print(f"rounded: {final_quantity}")
             return final_quantity
     
         except BinanceAPIException as e:
