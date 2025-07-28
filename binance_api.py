@@ -235,6 +235,7 @@ class BinanceAPI:
             order_id = order_result['orderId']
             avg_price = float(order_result.get('avgPrice', 0))
             executed_qty = float(order_result.get('executedQty', 0))
+            print(order_result)
     
             self.logger.info(f"✅ Ордер открыт: {symbol_for_request} {binance_side} {executed_qty} по средней цене {avg_price}. Order ID: {order_id}")
     
