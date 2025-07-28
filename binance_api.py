@@ -194,9 +194,32 @@ class BinanceAPI:
             self.logger.error(f"❌ Исключение при изменении TP/SL для {params.get('symbol', 'UNKNOWN')}: {e}")
             return {"success": False, "error": str(e)}
 
+    def prepare_for_new_entry(self, symbol: str):
+        """Отменяет все активные ордера по символу перед новым входом"""
+        symbol_for_request = self._get_symbol_for_request(symbol)
+        try:
+            # Получаем список активных ордеров
+            open_orders = self.client.futures_get_open_orders(symbol=symbol_for_request)
+        
+            if open_orders:
+                # Отменяем все
+                self.client.futures_cancel_all_open_orders(symbol=symbol_for_request)
+                self.logger.info(f"🧹 Отменено {len(open_orders)} активных ордеров по {symbol_for_request}")
+            else:
+                self.logger.debug(f"🟢 Нет активных ордеров по {symbol_for_request}")
+
+        except BinanceAPIException as e:
+            self.logger.error(f"❌ Ошибка при отмене ордеров для {symbol_for_request}: {e}")
+            raise e
+        except Exception as e:
+            self.logger.error(f"❌ Неожиданная ошибка при отмене ордеров для {symbol_for_request}: {e}")
+            raise e
+
     def open_order_with_tp_sl(self, params: Dict) -> Dict:
         """Открыть фьючерсный ордер с TP/SL"""
         try:
+            self.prepare_for_new_entry(params['symbol'])
+            
             symbol_for_request = self._get_symbol_for_request(params['symbol'])
             side_map = {"LONG": "BUY", "SHORT": "SELL"}
             binance_side = side_map.get(params['side'], params['side'].upper())
