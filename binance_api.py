@@ -84,7 +84,7 @@ class BinanceAPI:
             self.logger.error(f"❌ Неожиданная ошибка получения позиций: {e}")
             return []
 
-    def get_balance(self) -> Dict:
+    def get_balance(self) -> float:
         """Получить баланс фьючерсного кошелька USDT"""
         try:
             # Получаем список балансов
@@ -99,19 +99,20 @@ class BinanceAPI:
                         'coin': asset['asset'],
                         'walletBalance': float(asset['walletBalance']),
                         'unrealizedPnl': float(asset['unrealizedProfit']),
+                        'availableBalance': float(asset['availableBalance']),
                         # Добавьте другие поля при необходимости
                     }
                     self.logger.debug(f"Получен баланс USDT: {formatted_balance}")
-                    return formatted_balance
+                    return float(formatted_balance['availableBalance'])
 
             self.logger.warning("Баланс USDT не найден")
-            return {}
+            return 0
         except BinanceAPIException as e:
             self.logger.error(f"❌ Ошибка получения баланса: {e}")
-            return {}
+            return 0
         except Exception as e:
             self.logger.error(f"❌ Неожиданная ошибка получения баланса: {e}")
-            return {}
+            return 0
 
     def modify_trading_stop(self, params: Dict) -> Dict:
         """

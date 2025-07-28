@@ -88,7 +88,7 @@ class GoogleSignalsBot:
         try:
             balance = self.signal_processor.exchange.get_balance()
             if balance:
-                self.logger.info("Bybit API подключен. Баланс: {}".format(balance))
+                self.logger.info(f"Bybit API подключен. Баланс: {balance}")
             else:
                 raise Exception("Не удалось получить баланс Bybit")
         except Exception as e:
