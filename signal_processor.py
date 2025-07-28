@@ -97,34 +97,32 @@ class SignalProcessor:
 
                     posSize = self.exchange.calculate_position_size(signal['symbol'], usdtSize,current_price)
                     
-                    print(posSize)
-
-                    # # Проверяем возможность входа
-                    # if self._can_enter_position(signal):
-                    #     # Выполняем вход в позицию
-                    #     result = self._execute_signal(signal, posSize)
+                    # Проверяем возможность входа
+                    if self._can_enter_position(signal):
+                        # Выполняем вход в позицию
+                        result = self._execute_signal(signal, posSize)
                         
-                    #     if result['success']:
-                    #         self.processed_signals[signal_id] = {
-                    #             "processed": True,
-                    #             "order_id": result.get('order_id'),
-                    #             "tp_order_id": result.get('tp_order_id'),
-                    #             "sl_order_id": result.get('sl_order_id'),
-                    #             "take_profit": signal['take_profit'],
-                    #             "stop_loss": signal['stop_loss'],
-                    #         }
-                    #         processed_count += 1
+                        if result['success']:
+                            self.processed_signals[signal_id] = {
+                                "processed": True,
+                                "order_id": result.get('order_id'),
+                                "tp_order_id": result.get('tp_order_id'),
+                                "sl_order_id": result.get('sl_order_id'),
+                                "take_profit": signal['take_profit'],
+                                "stop_loss": signal['stop_loss'],
+                            }
+                            processed_count += 1
                             
-                    #         # Отправляем уведомление
-                    #         self._send_notification(signal, {**result, 'usdt': usdtSize})
+                            # Отправляем уведомление
+                            self._send_notification(signal, {**result, 'usdt': usdtSize})
                             
-                    #         # Отмечаем как обработанный
-                    #         # self.google_sheets.mark_signal_processed(signal['row'])
-                    #     else:
-                    #         error_count += 1
-                    #         self.logger.error(f"❌ Ошибка выполнения сигнала: {result['error']}")
-                    # else:
-                    #     self.logger.info(f"⏸️ Сигнал {signal['symbol']} пропущен - условия не подходят")
+                            # Отмечаем как обработанный
+                            # self.google_sheets.mark_signal_processed(signal['row'])
+                        else:
+                            error_count += 1
+                            self.logger.error(f"❌ Ошибка выполнения сигнала: {result['error']}")
+                    else:
+                        self.logger.info(f"⏸️ Сигнал {signal['symbol']} пропущен - условия не подходят")
                         
                 except Exception as e:
                     error_count += 1
