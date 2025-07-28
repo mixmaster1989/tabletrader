@@ -90,11 +90,11 @@ class GoogleSheetsAPI:
                             'row': i,
                             'date': parsed_date,
                             'symbol': row[1].strip().upper(),
-                            'entry_price': float(row[2]),
+                            'entry_price': float(row[2].replace(',', '.')),
                             'direction': row[3].strip().upper(),
-                            'take_profit': float(row[4]),
+                            'take_profit': float(row[4].replace(',', '.')),
                             'leverage': self.leverage,
-                            'stop_loss': float(row[6]),
+                            'stop_loss': float(row[6].replace(',', '.')),
                             'size': self.pos_size,
                             'status': 'new'  # Статус для отслеживания
                         }

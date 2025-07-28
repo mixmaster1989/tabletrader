@@ -122,13 +122,13 @@ class GoogleSignalsBot:
                     if result['errors'] > 0:
                         self.logger.warning(f"{result['errors']} ошибок при обработке")
                     
-                    # Отправляем статус каждые 10 циклов
+                    # Отправляем статус каждые 200 циклов
                     if hasattr(self, '_cycle_count'):
                         self._cycle_count += 1
                     else:
                         self._cycle_count = 1
                     
-                    if self._cycle_count % 10 == 0:
+                    if self._cycle_count % 200 == 0:
                         status = self.signal_processor.get_status()
                         self.telegram.send_status(status)
                     
