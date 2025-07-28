@@ -26,6 +26,7 @@ class BinanceAPI:
 
         # Инициализация клиента Binance
         self.client = Client(api_key=api_key, api_secret=api_secret, testnet=testnet)
+        self.client.futures_change_position_mode(dualSidePosition=False)
         self.logger.info(f"✅ Binance API инициализирован (testnet: {testnet})")
 
     def _get_symbol_for_request(self, symbol: str) -> str:
@@ -67,7 +68,6 @@ class BinanceAPI:
                             'side': 'Buy' if float(pos['positionAmt']) > 0 else 'Sell',
                             'entryPrice': float(pos['entryPrice']),
                             'unrealizedPnl': float(pos['unRealizedProfit']),
-                            'leverage': float(pos['leverage'])
                         }
                         open_positions.append(formatted_pos)
 
@@ -196,72 +196,106 @@ class BinanceAPI:
         """Открыть фьючерсный ордер с TP/SL"""
         try:
             symbol_for_request = self._get_symbol_for_request(params['symbol'])
-            side_map = {"LONG": "BUY", "SHORT": "SELL"} # Сохраняем для совместимости с логикой Bybit
+            side_map = {"LONG": "BUY", "SHORT": "SELL"}
             binance_side = side_map.get(params['side'], params['side'].upper())
             size = params['size']
             leverage = int(params['leverage'])
-            take_profit = params.get('take_profit') # Может быть None
-            stop_loss = params.get('stop_loss')     # Может быть None
-
+            take_profit = params.get('take_profit')
+            stop_loss = params.get('stop_loss')
+    
             self.logger.info(f"🛠️ Открытие ордера: {symbol_for_request}, {binance_side}, Размер: {size}, Плечо: {leverage}")
-
-            # 1. Устанавливаем плечо
+    
+            # 1. Установка плеча
             try:
                 self.client.futures_change_leverage(symbol=symbol_for_request, leverage=leverage)
                 self.logger.debug(f"Установлено плечо {leverage} для {symbol_for_request}")
             except BinanceAPIException as e:
-                 # Ошибка 4053 означает, что плечо уже такое
-                if e.code != -4053: # -4053: "Leverage is already at the same level"
-                    self.logger.warning(f"Предупреждение при установке плеча для {symbol_for_request}: {e}")
-
-            # 2. Открываем рыночную позицию
+                if e.code != -4053:  # Уже установлено
+                    self.logger.warning(f"Ошибка при установке плеча: {e}")
+    
+            # 2. Установка маржинального типа (ISOLATED)
+            try:
+                self.client.futures_change_margin_type(symbol=symbol_for_request, marginType='ISOLATED')
+            except BinanceAPIException as e:
+                if e.code != -4046:  # "No need to change margin type"
+                    self.logger.warning(f"Ошибка при установке ISOLATED: {e}")
+    
+            # 3. Открытие рыночной позиции
             order_params = {
                 'symbol': symbol_for_request,
                 'side': binance_side,
+                'positionSide': 'LONG' if binance_side == 'BUY' else 'SHORT',
                 'type': 'MARKET',
                 'quantity': str(size),
-                'takeProfit': str(take_profit) if take_profit else None,
-                'stopLoss': str(stop_loss) if stop_loss else None
+                'timestamp': int(time.time() * 1000)
             }
-
+    
             order_result = self.client.futures_create_order(**order_params)
-
-            if order_result and order_result.get('orderId'):
-                order_id = order_result['orderId']
-                avg_price = float(order_result.get('avgPrice', 0))
-                executed_qty = float(order_result.get('executedQty', 0))
-
-                self.logger.info(f"✅ Ордер открыт: {symbol_for_request} {binance_side} {executed_qty} по средней цене {avg_price}. Order ID: {order_id}")
-
-                # # 3. Устанавливаем TP/SL отдельно (более надежный способ)
-                # # Создаем временный params для modify_trading_stop
-                # tp_sl_params = {
-                #     'symbol': params['symbol'], # Передаем исходный символ
-                #      'take_profit': take_profit,
-                #      'stop_loss': stop_loss
-                # }
-                # tp_sl_result = self.modify_trading_stop(tp_sl_params)
-                # if not tp_sl_result.get('success'):
-                #      self.logger.warning(f"⚠️ Ошибка при установке TP/SL после открытия ордера: {tp_sl_result.get('error')}")
-
-                return {
-                    "orderId": order_id,
-                    'success': True,
-                    'tpOrderId': None,
-                    'slOrderId': None,
-                    'avgPrice': avg_price
-                }
-            else:
-                error_msg = order_result.get('msg', 'Неизвестная ошибка при размещении ордера')
-                self.logger.error(f"❌ Неудачная попытка открытия ордера: {error_msg}")
-                return {"orderId": None, 'success': False, 'tpOrderId': None, 'slOrderId': None, 'error': error_msg}
-
+            order_id = order_result['orderId']
+            avg_price = float(order_result.get('avgPrice', 0))
+            executed_qty = float(order_result.get('executedQty', 0))
+    
+            self.logger.info(f"✅ Ордер открыт: {symbol_for_request} {binance_side} {executed_qty} по средней цене {avg_price}. Order ID: {order_id}")
+    
+            tp_order_id = None
+            sl_order_id = None
+    
+            # 4. Установка Take Profit (TAKE_PROFIT_MARKET)
+            if take_profit:
+                try:
+                    tp_params = {
+                        'symbol': symbol_for_request,
+                        'side': 'SELL' if binance_side == 'BUY' else 'BUY',
+                        'positionSide': 'LONG' if binance_side == 'BUY' else 'SHORT',
+                        'type': 'TAKE_PROFIT_MARKET',
+                        'quantity': str(executed_qty),
+                        'stopPrice': str(take_profit),
+                        'reduceOnly': 'true',
+                        'workingType': 'MARK_PRICE',  # Рекомендуется
+                        'timestamp': int(time.time() * 1000)
+                    }
+                    tp_result = self.client.futures_create_order(**tp_params)
+                    tp_order_id = tp_result['orderId']
+                    self.logger.info(f"✅ TP установлен: {take_profit} (Order ID: {tp_order_id})")
+                except BinanceAPIException as e:
+                    self.logger.error(f"❌ Ошибка при установке TP: {e}")
+                    # Не прерываем, продолжаем
+    
+            # 5. Установка Stop Loss (STOP_MARKET)
+            if stop_loss:
+                try:
+                    sl_params = {
+                        'symbol': symbol_for_request,
+                        'side': 'SELL' if binance_side == 'BUY' else 'BUY',
+                        'positionSide': 'LONG' if binance_side == 'BUY' else 'SHORT',
+                        'type': 'STOP_MARKET',
+                        'quantity': str(executed_qty),
+                        'stopPrice': str(stop_loss),
+                        'reduceOnly': 'true',
+                        'workingType': 'MARK_PRICE',  # Рекомендуется
+                        'timestamp': int(time.time() * 1000)
+                    }
+                    sl_result = self.client.futures_create_order(**sl_params)
+                    sl_order_id = sl_result['orderId']
+                    self.logger.info(f"✅ SL установлен: {stop_loss} (Order ID: {sl_order_id})")
+                except BinanceAPIException as e:
+                    self.logger.error(f"❌ Ошибка при установке SL: {e}")
+    
+            return {
+                "success": True,
+                "orderId": order_id,
+                "tpOrderId": tp_order_id,
+                "slOrderId": sl_order_id,
+                "avgPrice": avg_price,
+                "executedQty": executed_qty
+            }
+    
         except BinanceAPIException as e:
-            self.logger.error(f"❌ Ошибка Binance при открытии ордера для {params.get('symbol', 'UNKNOWN')}: {e}")
-            return {'success': False, 'retCode': e.code, 'retMsg': e.message}
+            self.logger.error(f"❌ Ошибка Binance API: {e}")
+            return {"success": False, "retCode": e.code, "retMsg": e.message}
         except Exception as e:
-            self.logger.error(f"❌ Неожиданная ошибка при открытии ордера для {params.get('symbol', 'UNKNOWN')}: {e}")
-            return {'success': False, 'retCode': 1, 'retMsg': str(e)}
+            self.logger.error(f"❌ Неизвестная ошибка: {e}")
+            return {"success": False, "retCode": 1, "retMsg": str(e)}
 
     def calculate_position_size(self, symbol: str, usdt_size: float, last_price: float) -> float:
         try:

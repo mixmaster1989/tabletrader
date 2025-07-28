@@ -178,7 +178,11 @@ class SignalProcessor:
             
             # Открываем позицию
             result = self.exchange.open_order_with_tp_sl(order_params)
-            
+
+            if not result.get('tpOrderId') or not result.get('slOrderId'):
+                self.logger.error(f"❌ Не удалось установить TP/SL для {signal['symbol']} TP: {signal['take_profit']}, SL: {signal['stop_loss']} Проверьте вручную")
+                self.telegram.send_message(f"❌ Не удалось установить TP/SL для {signal['symbol']}, TP: {signal['take_profit']}, SL: {signal['stop_loss']}, Проверьте вручную")
+
             if result.get('success'):
                 return {
                     'success': True,
