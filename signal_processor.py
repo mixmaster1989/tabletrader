@@ -9,7 +9,7 @@ import logging
 import time
 import json
 from typing import List, Dict, Optional
-from datetime import datetime
+from datetime import datetime, date
 from binance_api import BinanceAPI
 from google_sheets_api import GoogleSheetsAPI
 from telegram_bot import TelegramBot
@@ -162,12 +162,18 @@ class SignalProcessor:
 
             # Записываем обратно в файл
             with open(self.executed_signals_file, 'w', encoding='utf-8') as f:
-                json.dump(signals_data, f, ensure_ascii=False, indent=4)
+                json.dump(signals_data, f, ensure_ascii=False, indent=4, default=self._json_serial)
                 
             self.logger.info(f"💾 Сигнал для {signal['symbol']} сохранен в {self.executed_signals_file}")
 
         except Exception as e:
             self.logger.error(f"❌ Ошибка сохранения сигнала в файл: {e}")
+
+    def _json_serial(self, obj):
+        """JSON serializer for objects not serializable by default json code"""
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        raise TypeError(f"Type {type(obj)} not serializable")
     
     def _can_enter_position(self, signal: Dict) -> bool:
         """Проверка возможности входа в позицию"""

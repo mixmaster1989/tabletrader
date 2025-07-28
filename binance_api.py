@@ -226,7 +226,6 @@ class BinanceAPI:
             order_params = {
                 'symbol': symbol_for_request,
                 'side': binance_side,
-                'positionSide': 'LONG' if binance_side == 'BUY' else 'SHORT',
                 'type': 'MARKET',
                 'quantity': str(size),
                 'timestamp': int(time.time() * 1000)
@@ -248,7 +247,6 @@ class BinanceAPI:
                     tp_params = {
                         'symbol': symbol_for_request,
                         'side': 'SELL' if binance_side == 'BUY' else 'BUY',
-                        'positionSide': 'LONG' if binance_side == 'BUY' else 'SHORT',
                         'type': 'TAKE_PROFIT_MARKET',
                         'quantity': str(executed_qty),
                         'stopPrice': str(take_profit),
@@ -269,7 +267,6 @@ class BinanceAPI:
                     sl_params = {
                         'symbol': symbol_for_request,
                         'side': 'SELL' if binance_side == 'BUY' else 'BUY',
-                        'positionSide': 'LONG' if binance_side == 'BUY' else 'SHORT',
                         'type': 'STOP_MARKET',
                         'quantity': str(executed_qty),
                         'stopPrice': str(stop_loss),
