@@ -28,15 +28,14 @@ class TelegramBot:
                 'parse_mode': parse_mode
             }
             
-            return True
-            # response = requests.post(url, data=data, timeout=10)
+            response = requests.post(url, data=data, timeout=10)
             
-            # if response.status_code == 200:
-            #     self.logger.info("✅ Сообщение отправлено в Telegram")
-            #     return True
-            # else:
-            #     self.logger.error(f"❌ Ошибка отправки в Telegram: {response.status_code}")
-            #     return False
+            if response.status_code == 200:
+                self.logger.info("✅ Сообщение отправлено в Telegram")
+                return True
+            else:
+                self.logger.error(f"❌ Ошибка отправки в Telegram: {response.status_code}")
+                return False
                 
         except Exception as e:
             self.logger.error(f"❌ Ошибка отправки в Telegram: {e}")
