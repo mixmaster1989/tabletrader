@@ -9,7 +9,7 @@ import logging
 import time
 import json
 from typing import List, Dict, Optional
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from binance_api import BinanceAPI
 from google_sheets_api import GoogleSheetsAPI
 from telegram_bot import TelegramBot
