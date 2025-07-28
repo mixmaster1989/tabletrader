@@ -152,8 +152,7 @@ class SignalProcessor:
                             # Отправляем уведомление
                             self._send_notification(signal, {**result, 'usdt': usdtSize})
                             
-                            # Отмечаем как обработанный
-                            # self.google_sheets.mark_signal_processed(signal['row'])
+                            break
                         else:
                             error_count += 1
                             self.logger.error(f"❌ Ошибка выполнения сигнала: {result['error']}")
