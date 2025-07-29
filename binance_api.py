@@ -221,8 +221,24 @@ class BinanceAPI:
             self.logger.error(f"❌ Неожиданная ошибка при отмене ордеров для {symbol_for_request}: {e}")
             raise e
 
-    def open_order_with_tp_sl(self, params: Dict) -> Dict:
-        """Открыть фьючерсный ордер с TP/SL"""
+    def check_order_status(self, order_id: str, symbol: str) -> Optional[str]:
+        """Проверяет статус ордера."""
+        try:
+            symbol_for_request = self._get_symbol_for_request(symbol)
+            order = self.client.futures_get_order(symbol=symbol_for_request, orderId=order_id)
+            return order.get('status')
+        except BinanceAPIException as e:
+            if e.code == -2013: # Order does not exist
+                self.logger.warning(f"Ордер {order_id} для {symbol} не найден.")
+                return "NOT_FOUND"
+            self.logger.error(f"❌ Ошибка проверки статуса ордера {order_id}: {e}")
+            return None
+        except Exception as e:
+            self.logger.error(f"❌ Исключение при проверке статуса ордера {order_id}: {e}")
+            return None
+
+    def place_limit_order(self, params: Dict) -> Dict:
+        """Размещает лимитный ордер."""
         try:
             self.prepare_for_new_entry(params['symbol'])
             
@@ -231,8 +247,7 @@ class BinanceAPI:
             binance_side = side_map.get(params['side'], params['side'].upper())
             size = params['size']
             leverage = int(params['leverage'])
-            take_profit = params.get('take_profit')
-            stop_loss = params.get('stop_loss')
+            price = params.get('price')
     
             self.logger.info(f"🛠️ Открытие ордера: {symbol_for_request}, {binance_side}, Размер: {size}, Плечо: {leverage}")
     
@@ -255,67 +270,18 @@ class BinanceAPI:
             order_params = {
                 'symbol': symbol_for_request,
                 'side': binance_side,
-                'type': 'MARKET',
+                'type': 'LIMIT',
+                'timeInForce': 'GTC',
                 'quantity': str(size),
+                'price': str(price),
                 'timestamp': int(time.time() * 1000)
             }
     
             order_result = self.client.futures_create_order(**order_params)
-            order_id = order_result['orderId']
-            avg_price = float(order_result.get('avgPrice', 0))
-            executed_qty = str(size)
-
-            self.logger.info(f"✅ Ордер открыт: {symbol_for_request} {binance_side} {executed_qty} по средней цене {avg_price}. Order ID: {order_id}")
-    
-            tp_order_id = None
-            sl_order_id = None
-    
-            # 4. Установка Take Profit (TAKE_PROFIT_MARKET)
-            if take_profit:
-                try:
-                    tp_params = {
-                        'symbol': symbol_for_request,
-                        'side': 'SELL' if binance_side == 'BUY' else 'BUY',
-                        'type': 'TAKE_PROFIT_MARKET',
-                        'quantity': str(executed_qty),
-                        'stopPrice': str(take_profit),
-                        'reduceOnly': 'true',
-                        'workingType': 'MARK_PRICE',  # Рекомендуется
-                        'timestamp': int(time.time() * 1000)
-                    }
-                    tp_result = self.client.futures_create_order(**tp_params)
-                    tp_order_id = tp_result['orderId']
-                    self.logger.info(f"✅ TP установлен: {take_profit} (Order ID: {tp_order_id})")
-                except BinanceAPIException as e:
-                    self.logger.error(f"❌ Ошибка при установке TP: {e}")
-                    # Не прерываем, продолжаем
-    
-            # 5. Установка Stop Loss (STOP_MARKET)
-            if stop_loss:
-                try:
-                    sl_params = {
-                        'symbol': symbol_for_request,
-                        'side': 'SELL' if binance_side == 'BUY' else 'BUY',
-                        'type': 'STOP_MARKET',
-                        'quantity': str(executed_qty),
-                        'stopPrice': str(stop_loss),
-                        'reduceOnly': 'true',
-                        'workingType': 'MARK_PRICE',  # Рекомендуется
-                        'timestamp': int(time.time() * 1000)
-                    }
-                    sl_result = self.client.futures_create_order(**sl_params)
-                    sl_order_id = sl_result['orderId']
-                    self.logger.info(f"✅ SL установлен: {stop_loss} (Order ID: {sl_order_id})")
-                except BinanceAPIException as e:
-                    self.logger.error(f"❌ Ошибка при установке SL: {e}")
-    
+            self.logger.info(f"✅ Лимитный ордер размещен: {order_result}")
             return {
                 "success": True,
-                "orderId": order_id,
-                "tpOrderId": tp_order_id,
-                "slOrderId": sl_order_id,
-                "avgPrice": avg_price,
-                "executedQty": executed_qty
+                "orderId": order_result['orderId']
             }
     
         except BinanceAPIException as e:
@@ -324,6 +290,64 @@ class BinanceAPI:
         except Exception as e:
             self.logger.error(f"❌ Неизвестная ошибка: {e}")
             return {"success": False, "retCode": 1, "retMsg": str(e)}
+
+    def place_tp_sl_for_position(self, params: Dict) -> Dict:
+        """Устанавливает TP/SL для существующей позиции."""
+        try:
+            symbol = params['symbol']
+            side = params['direction'] # 'LONG' или 'SHORT'
+            quantity = params['size']
+            take_profit = params['take_profit']
+            stop_loss = params['stop_loss']
+
+            symbol_for_request = self._get_symbol_for_request(symbol)
+            order_side = 'SELL' if side == 'LONG' else 'BUY'
+
+            orders_placed = {}
+
+            # Установка Take Profit
+            if take_profit:
+                try:
+                    tp_params = {
+                        'symbol': symbol_for_request,
+                        'side': order_side,
+                        'type': 'TAKE_PROFIT_MARKET',
+                        'quantity': str(quantity),
+                        'stopPrice': str(take_profit),
+                        'reduceOnly': 'true',
+                        'workingType': 'MARK_PRICE'
+                    }
+                    tp_result = self.client.futures_create_order(**tp_params)
+                    orders_placed['tp_order_id'] = tp_result['orderId']
+                    self.logger.info(f"✅ TP для {symbol} установлен: {tp_result}")
+                except BinanceAPIException as e:
+                    self.logger.error(f"❌ Ошибка установки TP для {symbol}: {e}")
+                    orders_placed['tp_error'] = str(e)
+
+            # Установка Stop Loss
+            if stop_loss:
+                try:
+                    sl_params = {
+                        'symbol': symbol_for_request,
+                        'side': order_side,
+                        'type': 'STOP_MARKET',
+                        'quantity': str(quantity),
+                        'stopPrice': str(stop_loss),
+                        'reduceOnly': 'true',
+                        'workingType': 'MARK_PRICE'
+                    }
+                    sl_result = self.client.futures_create_order(**sl_params)
+                    orders_placed['sl_order_id'] = sl_result['orderId']
+                    self.logger.info(f"✅ SL для {symbol} установлен: {sl_result}")
+                except BinanceAPIException as e:
+                    self.logger.error(f"❌ Ошибка установки SL для {symbol}: {e}")
+                    orders_placed['sl_error'] = str(e)
+
+            return {'success': True, 'orders': orders_placed}
+
+        except Exception as e:
+            self.logger.error(f"❌ Исключение при установке TP/SL для {params.get('symbol', 'UNKNOWN')}: {e}")
+            return {'success': False, 'error': str(e)}
 
     def calculate_position_size(self, symbol: str, usdt_size: float, last_price: float) -> float:
         try:

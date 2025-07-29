@@ -10,9 +10,16 @@ import time
 import json
 from typing import List, Dict, Optional
 from datetime import datetime, date, timedelta
+from enum import Enum
 from binance_api import BinanceAPI
 from google_sheets_api import GoogleSheetsAPI
 from telegram_bot import TelegramBot
+
+class OrderStatus(Enum):
+    PLACED = "размещен"
+    FILLED = "исполнен"
+    CLOSED = "закрыт"
+    ERROR = "ошибка"
 
 class SignalProcessor:
     def __init__(self, config: Dict):
@@ -39,40 +46,82 @@ class SignalProcessor:
         )
         
         # Отслеживание обработанных сигналов
-        self.processed_signals = dict()
+        self.processed_signals_file = 'processed_signals.json'
+        self.processed_signals = self._load_processed_signals()
         self.last_check_time = None
-        self.executed_signals_file = 'executed_signals.json'
         
         self.logger.info("✅ SignalProcessor инициализирован")
+
+    def _load_processed_signals(self) -> Dict:
+        """Загружает обработанные сигналы из файла."""
+        try:
+            with open(self.processed_signals_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+
+    def _save_processed_signals(self):
+        """Сохраняет обработанные сигналы в файл."""
+        try:
+            with open(self.processed_signals_file, 'w', encoding='utf-8') as f:
+                json.dump(self.processed_signals, f, ensure_ascii=False, indent=4)
+            self.logger.info(f"💾 Обработанные сигналы сохранены в {self.processed_signals_file}")
+        except Exception as e:
+            self.logger.error(f"❌ Ошибка сохранения обработанных сигналов: {e}")
     
     def process_signals(self) -> Dict:
         """Основной метод обработки сигналов"""
         try:
+            # 1. Проверка статуса размещенных ордеров (PLACED)
+            for signal_id, signal_data in list(self.processed_signals.items()):
+                if signal_data.get('status') == OrderStatus.PLACED.value:
+                    order_status = self.exchange.check_order_status(signal_data['order_id'], signal_data['symbol'])
+                    if order_status == 'NOT_FOUND':
+                        self.logger.info(f"❌ Ордер {signal_id} не найден!")
+                        self.processed_signals[signal_id]['status'] = OrderStatus.ERROR.value
+                        self.telegram.send_message(f"⚠️ Ордер {signal_id} не найден!")
+                        continue
+                    if order_status == None:
+                        self.logger.info(f"⚠️ Ошибка получения статуса ордера {signal_id}!")
+                        self.processed_signals[signal_id]['status'] = OrderStatus.ERROR.value
+                        self.telegram.send_message(f"⚠️ Ошибка получения статуса ордера {signal_id}!")
+                        continue
+                    if order_status == 'FILLED':
+                        self.logger.info(f"✅ Ордер {signal_id} исполнен!")
+                        self.processed_signals[signal_id]['status'] = OrderStatus.FILLED.value
+                        self._send_notification(self.processed_signals[signal_id], status=OrderStatus.FILLED)
+
+                        # Устанавливаем TP/SL для новой позиции
+                        tp_sl_params = {
+                            'symbol': signal_data['symbol'],
+                            'direction': signal_data['direction'],
+                            'size': signal_data['size'],
+                            'take_profit': signal_data['take_profit'],
+                            'stop_loss': signal_data['stop_loss']
+                        }
+                        tp_sl_result = self.exchange.place_tp_sl_for_position(tp_sl_params)
+                        if tp_sl_result.get('success'):
+                            self.logger.info(f"✅ TP/SL для {signal_id} успешно установлены.")
+                            self.processed_signals[signal_id].update(tp_sl_result.get('orders', {}))
+                            self.telegram.send_message(f"✅ TP/SL для {signal_id} успешно установлены. TP: {signal_data['take_profit']}, SL: {signal_data['stop_loss']}")
+                        else:
+                            self.logger.error(f"❌ Не удалось установить TP/SL для {signal_id}. Ошибка: {tp_sl_result.get('error')}")
+                            self.telegram.send_error(f"❌ Ошибка установки TP/SL для {signal_id}")
+                    elif order_status in ['CANCELED', 'EXPIRED']:
+                        self.logger.warning(f"❌ Ордер {signal_id} отменен или истек.")
+                        self.processed_signals[signal_id]['status'] = OrderStatus.CLOSED.value
+                        self.telegram.send_message(f"❌ Ордер {signal_id} отменен или истек.")
+
+            # 2. Синхронизация закрытых позиций (FILLED -> CLOSED)
             positions = self.exchange.get_positions()
-            if positions:
-                self.logger.info(f"📊 Открыто {len(positions)} позиций")
-
-            for pos in positions:
-                self.logger.info(f"📊 Позиция: {pos['symbol']} {pos['side']} {pos['size']} USDT")
-
-            # Синхронизация состояния с биржей
             open_position_symbols = {p['symbol'] for p in positions}
-            processed_ids_to_reset = []
-
-            for signal_id, signal_data in self.processed_signals.items():
-                if signal_data.get('processed'):
-                    # Извлекаем символ из ID сигнала. Формат ID: f"{symbol}_{row}"
-                    symbol = signal_id.split('_')[0]
-                    # Символы на бирже обычно имеют формат 'BTCUSDT'
-                    position_symbol = symbol + 'USDT'
-                    
+            for signal_id, signal_data in list(self.processed_signals.items()):
+                if signal_data.get('status') == OrderStatus.FILLED.value:
+                    position_symbol = signal_data['symbol'] + 'USDT'
                     if position_symbol not in open_position_symbols:
-                        self.logger.info(f"🔄 Позиция по сигналу {signal_id} закрыта на бирже. Сбрасываю статус.")
-                        processed_ids_to_reset.append(signal_id)
-
-            for signal_id in processed_ids_to_reset:
-                self.telegram.send_message(f"🔄 Позиция по сигналу {signal_id} закрыта на бирже.")
-                self.processed_signals[signal_id]['processed'] = False
+                        self.logger.info(f"🔄 Позиция по сигналу {signal_id} закрыта на бирже.")
+                        self.processed_signals[signal_id]['status'] = OrderStatus.CLOSED.value
+                        self.telegram.send_message(f"✅ Позиция по сигналу {signal_id} закрыта.")
 
             # Читаем сигналы из Google таблицы
             signals = self.google_sheets.read_signals()
@@ -86,73 +135,49 @@ class SignalProcessor:
 
             for signal in signals:
                 try:
-                    # Проверяем, не обработан ли уже сигнал
                     signal_id = f"{signal['symbol']}_{signal['row']}"
-                    if signal_id in self.processed_signals:
-                        processed_signal = self.processed_signals[signal_id]
-                        # Если сигнал уже обработан и позиция открыта, пропускаем
-                        if not processed_signal['processed']:
-                            continue
-                        # Если сигнал уже обработан и позиция еще на бирже, но TP/SL изменились, обновляем
-                        if signal['take_profit'] != processed_signal['take_profit'] or \
-                           signal['stop_loss'] != processed_signal['stop_loss']:
-                            try:
-                                self.logger.info(f"📝 Обнаружено изменение TP/SL для {signal['symbol']}. Обновление ордера...")
-                                update_params = {
-                                    'symbol': signal['symbol'],
-                                    'take_profit': signal['take_profit'],
-                                    'stop_loss': signal['stop_loss']
-                                }
-                                update_result = self.exchange.modify_trading_stop(update_params)
-                                if update_result['success']:
-                                    # Обновляем сохраненные данные
-                                    self.processed_signals[signal_id]['take_profit'] = signal['take_profit']
-                                    self.processed_signals[signal_id]['stop_loss'] = signal['stop_loss']
-                                    self.logger.info(f"✅ TP/SL для {signal['symbol']} успешно обновлен.")
-                                    self.telegram.send_message(f"✅ TP/SL для {signal['symbol']} успешно обновлен.")
-                                else:
-                                    self.logger.error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {update_result['error']}")
-                                    self.telegram.send_error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}")
-                            except Exception as e:
-                                self.logger.error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {e}")
-                                self.telegram.send_error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}")
+                    # Пропускаем, если сигнал уже в работе (не в статусе CLOSED или ERROR)
+                    if signal_id in self.processed_signals and \
+                       self.processed_signals[signal_id].get('status') not in [OrderStatus.CLOSED.value, OrderStatus.ERROR.value]:
+                        # Логика обновления TP/SL для уже исполненных ордеров
+                        if self.processed_signals[signal_id].get('status') == OrderStatus.FILLED.value and \
+                           (signal['take_profit'] != self.processed_signals[signal_id]['take_profit'] or \
+                            signal['stop_loss'] != self.processed_signals[signal_id]['stop_loss']):
+                            self._update_tp_sl(signal, signal_id)
                         continue
 
-                    if len(positions) >= int(self.config['MAX_POSITIONS']):
-                        self.logger.info(f"📊 Открыто {len(positions)} позиций, больше максимального количества {self.config['MAX_POSITIONS']}")
+                    # Проверяем лимит открытых позиций
+                    active_positions = sum(1 for s in self.processed_signals.values() if s.get('status') == OrderStatus.FILLED.value)
+                    if active_positions >= int(self.config['MAX_POSITIONS']):
+                        self.logger.info(f"📊 Достигнут лимит активных позиций ({self.config['MAX_POSITIONS']}).")
                         continue
 
-                    if signal['date'] <= datetime.now() - timedelta(minutes=20):
+                    if signal['date'] <= datetime.now() + timedelta(minutes=20):
                         self.logger.warning(f"⚠️ Сигнал в строке {i} уже прошел")
                         continue
                     usdtSize = self.exchange.get_balance() * 0.95 / int(self.config['MAX_POSITIONS'])
                     signal['size'] = usdtSize
 
-                    current_price = self.exchange.get_last_price(signal['symbol'])
-
-                    posSize = self.exchange.calculate_position_size(signal['symbol'], usdtSize,current_price)
+                    posSize = self.exchange.calculate_position_size(signal['symbol'], usdtSize,signal['price'])
                     
-                    # Проверяем возможность входа
+                    # Вход в позицию (выставление лимитного ордера)
                     if self._can_enter_position(signal):
-                        self._save_executed_signal(signal)
-                        # Выполняем вход в позицию
                         result = self._execute_signal(signal, posSize)
                         
                         if result['success']:
                             self.processed_signals[signal_id] = {
-                                "processed": True,
-                                "order_id": result.get('order_id'),
-                                "tp_order_id": result.get('tp_order_id'),
-                                "sl_order_id": result.get('sl_order_id'),
-                                "take_profit": signal['take_profit'],
-                                "stop_loss": signal['stop_loss'],
+                                'status': OrderStatus.PLACED.value,
+                                'order_id': result.get('order_id'),
+                                'symbol': signal['symbol'],
+                                'direction': signal['direction'],
+                                'entry_price': signal['entry_price'],
+                                'take_profit': signal['take_profit'],
+                                'stop_loss': signal['stop_loss'],
+                                'size': posSize
                             }
                             processed_count += 1
-                            
-                            # Отправляем уведомление
-                            self._send_notification(signal, {**result, 'usdt': usdtSize})
-                            
-                            break
+                            self._send_notification(self.processed_signals[signal_id], status=OrderStatus.PLACED)
+                            break # Выходим после успешного размещения одного ордера
                         else:
                             error_count += 1
                             self.logger.error(f"❌ Ошибка выполнения сигнала: {result['error']}")
@@ -163,6 +188,7 @@ class SignalProcessor:
                     error_count += 1
                     self.logger.error(f"❌ Ошибка обработки сигнала {signal.get('symbol', 'Unknown')}: {e}")
             
+            self._save_processed_signals() # Сохраняем состояние после цикла
             self.last_check_time = datetime.now()
             
             return {
@@ -173,39 +199,31 @@ class SignalProcessor:
             
         except Exception as e:
             self.logger.error(f"❌ Ошибка обработки сигналов: {e}")
+            self._save_processed_signals() # Сохраняем состояние даже если была ошибка
             return {'processed': 0, 'errors': 1}
 
-    def _save_executed_signal(self, signal: Dict):
-        """Сохраняет исполненный сигнал в JSON файл."""
+    def _update_tp_sl(self, signal: Dict, signal_id: str):
+        """Обновляет Take Profit и Stop Loss для активной позиции."""
         try:
-            # Добавляем временную метку к сигналу
-            signal_to_save = signal.copy()
-            signal_to_save['execution_time'] = datetime.now().isoformat()
-
-            # Читаем существующие данные
-            try:
-                with open(self.executed_signals_file, 'r', encoding='utf-8') as f:
-                    signals_data = json.load(f)
-            except (FileNotFoundError, json.JSONDecodeError):
-                signals_data = []
-
-            # Добавляем новый сигнал
-            signals_data.append(signal_to_save)
-
-            # Записываем обратно в файл
-            with open(self.executed_signals_file, 'w', encoding='utf-8') as f:
-                json.dump(signals_data, f, ensure_ascii=False, indent=4, default=self._json_serial)
-                
-            self.logger.info(f"💾 Сигнал для {signal['symbol']} сохранен в {self.executed_signals_file}")
-
+            self.logger.info(f"📝 Обнаружено изменение TP/SL для {signal['symbol']}. Обновление ордера...")
+            update_params = {
+                'symbol': signal['symbol'],
+                'take_profit': signal['take_profit'],
+                'stop_loss': signal['stop_loss']
+            }
+            update_result = self.exchange.modify_trading_stop(update_params)
+            if update_result['success']:
+                self.processed_signals[signal_id]['take_profit'] = signal['take_profit']
+                self.processed_signals[signal_id]['stop_loss'] = signal['stop_loss']
+                self.logger.info(f"✅ TP/SL для {signal['symbol']} успешно обновлен.")
+                self.telegram.send_message(f"✅ TP/SL для {signal['symbol']} успешно обновлен.")
+            else:
+                error_msg = update_result.get('error', 'Неизвестная ошибка')
+                self.logger.error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {error_msg}")
+                self.telegram.send_error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {error_msg}")
         except Exception as e:
-            self.logger.error(f"❌ Ошибка сохранения сигнала в файл: {e}")
-
-    def _json_serial(self, obj):
-        """JSON serializer for objects not serializable by default json code"""
-        if isinstance(obj, (datetime, date)):
-            return obj.isoformat()
-        raise TypeError(f"Type {type(obj)} not serializable")
+            self.logger.error(f"❌ Исключение при обновлении TP/SL для {signal['symbol']}: {e}")
+            self.telegram.send_error(f"❌ Исключение при обновлении TP/SL для {signal['symbol']}")
     
     def _can_enter_position(self, signal: Dict) -> bool:
         """Проверка возможности входа в позицию"""
@@ -216,12 +234,6 @@ class SignalProcessor:
                 if pos.get('symbol') == signal['symbol'] + 'USDT':
                     self.logger.info(f"⏸️ Позиция по {signal['symbol']} уже открыта")
                     return False
-            
-            # Проверяем цену входа
-            current_price = self.exchange.get_last_price(signal['symbol'])
-            if not current_price:
-                self.logger.error(f"❌ Не удалось получить цену для {signal['symbol']}")
-                return False
             
             return True
             
@@ -238,24 +250,17 @@ class SignalProcessor:
                 'size': posSize,
                 'leverage': signal['leverage'],
                 'take_profit': signal['take_profit'],
-                'stop_loss': signal['stop_loss']
+                'stop_loss': signal['stop_loss'],
+                'price': signal['entry_price']
             }
             
-            # Открываем позицию
-            result = self.exchange.open_order_with_tp_sl(order_params)
-
-            if not result.get('tpOrderId') or not result.get('slOrderId'):
-                self.logger.error(f"❌ Не удалось установить TP/SL для {signal['symbol']} TP: {signal['take_profit']}, SL: {signal['stop_loss']} Проверьте вручную")
-                self.telegram.send_message(f"❌ Не удалось установить TP/SL для {signal['symbol']}, TP: {signal['take_profit']}, SL: {signal['stop_loss']}, Проверьте вручную")
+            # Выставляем лимитный ордер
+            result = self.exchange.place_limit_order(order_params)
 
             if result.get('success'):
                 return {
                     'success': True,
                     'order_id': result.get('orderId'),
-                    'tp_order_id': result.get('tpOrderId'),
-                    'sl_order_id': result.get('slOrderId'),
-                    'price': result.get('avgPrice'),
-                    'size': order_params['size']
                 }
             else:
                 return {
@@ -269,24 +274,35 @@ class SignalProcessor:
                 'error': str(e)
             }
     
-    def _send_notification(self, signal: Dict, result: Dict):
-        """Отправка уведомления о сделке"""
+    def _send_notification(self, signal_data: Dict, status: OrderStatus):
+        """Отправка уведомления о сделке в зависимости от статуса."""
         try:
-            message = f"""🚀 НОВАЯ СДЕЛКА ОТКРЫТА
+            if status == OrderStatus.PLACED:
+                message = f"""🔵 ОРДЕР РАЗМЕЩЕН
 
-📊 Монета: {signal['symbol']}
-📈 Направление: {signal['direction']}
-💰 Цена входа: {signal['entry_price']}$
-🎯 Take Profit: {signal['take_profit']}$
-🛑 Stop Loss: {signal['stop_loss']}$
+📊 Монета: {signal_data['symbol']}
+📈 Направление: {signal_data['direction']}
+💰 Цена входа: {signal_data['entry_price']}$
+🎯 Take Profit: {signal_data['take_profit']}$
+🛑 Stop Loss: {signal_data['stop_loss']}$
 
-✅ Статус: Успешно
-🆔 Order ID: {result.get('order_id', 'N/A')}
-
+🆔 Order ID: {signal_data.get('order_id', 'N/A')}
 ⏰ {datetime.now().strftime('%H:%M:%S UTC')}"""
-            
+            elif status == OrderStatus.FILLED:
+                message = f"""✅ ОРДЕР ИСПОЛНЕН
+
+📊 Монета: {signal_data['symbol']}
+📈 Направление: {signal_data['direction']}
+💰 Цена входа: {signal_data['entry_price']}$
+
+✅ Позиция открыта!
+🆔 Order ID: {signal_data.get('order_id', 'N/A')}
+⏰ {datetime.now().strftime('%H:%M:%S UTC')}"""
+            else:
+                return
+
             self.telegram.send_message(message)
-            
+
         except Exception as e:
             self.logger.error(f"❌ Ошибка отправки уведомления: {e}")
     
