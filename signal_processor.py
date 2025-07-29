@@ -317,5 +317,4 @@ class SignalProcessor:
             'last_check': self.last_check_time.isoformat() if self.last_check_time else None,
             'processed_signals': len(self.processed_signals),
             'open_positions': len(self.exchange.get_positions()),
-            'max_positions': self.config['MAX_POSITIONS']
         } 

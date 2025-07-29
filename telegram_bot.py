@@ -52,7 +52,7 @@ class TelegramBot:
             message = f"""🤖 СТАТУС БОТА
 
 📊 Обработано сигналов: {status_data.get('processed_signals', 0)}
-📈 Открытых позиций: {status_data.get('open_positions', 0)}/{status_data.get('max_positions', 0)}
+📈 Открытых позиций: {status_data.get('open_positions', 0)}
 🕐 Последняя проверка: {status_data.get('last_check', 'N/A')}
 
 ✅ Бот работает"""
