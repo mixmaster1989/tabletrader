@@ -163,7 +163,7 @@ class SignalProcessor:
                         self.telegram.send_message(f"⚠️ Недостаточно средств на балансе для сигнала {signal['symbol']} в строке {signal['row']}")
                         continue
 
-                    posSize = self.exchange.calculate_position_size(signal['symbol'], signal['size'],signal['entry_price'])
+                    posSize = self.exchange.calculate_position_size(signal['symbol'], signal['size'] * signal['leverage'],signal['entry_price'])
                     
                     # Вход в позицию (выставление лимитного ордера)
                     if self._can_enter_position(signal):
