@@ -84,18 +84,15 @@ class GoogleSheetsAPI:
                         date_format = "%d.%m.%Y %H:%M"
                         parsed_date = datetime.strptime(row[0].strip(), date_format)
 
-                        if len(row) >= 10:
-                            continue
-
                         signal = {
                             'row': i,
                             'date': parsed_date,
                             'symbol': row[1].strip().upper(),
-                            'entry_price': float(row[2].replace(',', '.')),
+                            'entry_price': float(row[2].replace(',', '.').split('/')[0].strip()),
                             'direction': row[3].strip().upper(),
-                            'take_profit': float(row[4].replace(',', '.')),
+                            'take_profit': float(row[4].replace(',', '.').split('/')[0].strip()),
                             'leverage': self.leverage,
-                            'stop_loss': float(row[6].replace(',', '.')),
+                            'stop_loss': float(row[6].replace(',', '.').split('/')[0].strip()),
                             'size': self.pos_size,
                             'status': 'new'  # Статус для отслеживания
                         }
