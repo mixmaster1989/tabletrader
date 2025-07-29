@@ -152,13 +152,22 @@ class SignalProcessor:
                         self.logger.info(f"📊 Достигнут лимит активных позиций ({self.config['MAX_POSITIONS']}).")
                         continue
 
-                    if signal['date'] <= datetime.now() + timedelta(minutes=20):
-                        self.logger.warning(f"⚠️ Сигнал в строке {signal['row']} уже прошел")
+                    signal_time = signal['date']
+                    start_active = signal_time - timedelta(minutes=20)
+                    end_active = signal_time + timedelta(minutes=20)
+                    now = datetime.now()
+
+                    if now < start_active:
+                        self.logger.info(f"🕒 Сигнал в строке {signal['row']} ещё не активен (начало через {int((start_active - now).total_seconds() / 60)} мин)")
                         continue
+                    elif now > end_active:
+                        self.logger.warning(f"⚠️ Сигнал в строке {signal['row']} просрочен (прошло {(now - end_active).total_seconds() / 60:.1f} мин после окончания)")
+                        continue
+                    
                     usdtSize = self.exchange.get_balance() * 0.95 / int(self.config['MAX_POSITIONS'])
                     signal['size'] = usdtSize
 
-                    posSize = self.exchange.calculate_position_size(signal['symbol'], usdtSize,signal['price'])
+                    posSize = self.exchange.calculate_position_size(signal['symbol'], usdtSize,signal['entry_price'])
                     
                     # Вход в позицию (выставление лимитного ордера)
                     if self._can_enter_position(signal):
@@ -180,13 +189,13 @@ class SignalProcessor:
                             break # Выходим после успешного размещения одного ордера
                         else:
                             error_count += 1
-                            self.logger.error(f"❌ Ошибка выполнения сигнала: {result['error']}")
+                            self.logger.error(f"❌ Ошибка выполнения сигнала {signal.get('symbol', 'Unknown')} в строке {signal['row']}: {result['error']}")
                     else:
                         self.logger.info(f"⏸️ Сигнал {signal['symbol']} пропущен - условия не подходят")
                         
                 except Exception as e:
                     error_count += 1
-                    self.logger.error(f"❌ Ошибка обработки сигнала {signal.get('symbol', 'Unknown')}: {e}")
+                    self.logger.error(f"❌ Ошибка обработки сигнала {signal.get('symbol', 'Unknown')} в строке {signal['row']}: {e}")
             
             self._save_processed_signals() # Сохраняем состояние после цикла
             self.last_check_time = datetime.now()
