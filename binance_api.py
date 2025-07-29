@@ -144,10 +144,6 @@ class BinanceAPI:
             open_orders = self.client.futures_get_open_orders(symbol=symbol_for_request)
             tp_sl_order_ids = [o['orderId'] for o in open_orders if o['type'] in ['TAKE_PROFIT_MARKET', 'STOP_MARKET']]
 
-            if len(tp_sl_order_ids) != 2:
-                self.logger.error(f"❌ Неверное количество TP/SL ордеров для {symbol_for_request}: {len(tp_sl_order_ids)}")
-                return {"success": False, "error": "Неверное количество TP/SL ордеров"}
-
             # 4. Установить новые TP/SL
             orders_to_place = []
             if take_profit:
