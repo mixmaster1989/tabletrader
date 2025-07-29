@@ -136,9 +136,9 @@ class SignalProcessor:
             for signal in signals:
                 try:
                     signal_id = f"{signal['symbol']}_{signal['row']}"
-                    # Пропускаем, если сигнал уже в работе (не в статусе CLOSED или ERROR)
+                    # Пропускаем, если сигнал уже в работе (не в статусе ERROR)
                     if signal_id in self.processed_signals and \
-                       self.processed_signals[signal_id].get('status') not in [OrderStatus.CLOSED.value, OrderStatus.ERROR.value]:
+                       self.processed_signals[signal_id].get('status') not in [OrderStatus.ERROR.value]:
                         # Логика обновления TP/SL для уже исполненных ордеров
                         if self.processed_signals[signal_id].get('status') == OrderStatus.FILLED.value and \
                            (signal['take_profit'] != self.processed_signals[signal_id]['take_profit'] or \
