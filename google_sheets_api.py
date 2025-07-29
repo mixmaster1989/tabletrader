@@ -40,7 +40,7 @@ class GoogleSheetsAPI:
             self.logger.error(f"❌ Ошибка инициализации Google Sheets API: {e}")
             raise
     
-    def read_signals(self, range_name: str = "B:M") -> List[Dict]:
+    def read_signals(self, range_name: str = "'Trades'!B:M") -> List[Dict]:
         """
         Читать сигналы из Google таблицы
         
