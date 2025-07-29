@@ -101,7 +101,7 @@ class SignalProcessor:
                         }
                         tp_sl_result = self.exchange.place_tp_sl_for_position(tp_sl_params)
                         if tp_sl_result.get('success'):
-                            self.logger.info(f"✅ TP/SL для {signal_id} успешно установлены.")
+                            self.logger.info(f"✅ TP/SL для {signal_id} успешно установлены. TP: {signal_data['take_profit']}, SL: {signal_data['stop_loss']}")
                             self.processed_signals[signal_id].update(tp_sl_result.get('orders', {}))
                             self.telegram.send_message(f"✅ TP/SL для {signal_id} успешно установлены. TP: {signal_data['take_profit']}, SL: {signal_data['stop_loss']}")
                         else:
@@ -223,15 +223,15 @@ class SignalProcessor:
             if update_result['success']:
                 self.processed_signals[signal_id]['take_profit'] = signal['take_profit']
                 self.processed_signals[signal_id]['stop_loss'] = signal['stop_loss']
-                self.logger.info(f"✅ TP/SL для {signal['symbol']} успешно обновлен.")
-                self.telegram.send_message(f"✅ TP/SL для {signal['symbol']} успешно обновлен.")
+                self.logger.info(f"✅ TP/SL для {signal_id} успешно обновлен. TP: {signal['take_profit']}, SL: {signal['stop_loss']}")
+                self.telegram.send_message(f"✅ TP/SL для {signal_id} успешно обновлен. TP: {signal['take_profit']}, SL: {signal['stop_loss']}")
             else:
                 error_msg = update_result.get('error', 'Неизвестная ошибка')
-                self.logger.error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {error_msg}")
-                self.telegram.send_error(f"❌ Ошибка обновления TP/SL для {signal['symbol']}: {error_msg}")
+                self.logger.error(f"❌ Ошибка обновления TP/SL для {signal_id}: {error_msg}")
+                self.telegram.send_error(f"❌ Ошибка обновления TP/SL для {signal_id}: {error_msg}")
         except Exception as e:
-            self.logger.error(f"❌ Исключение при обновлении TP/SL для {signal['symbol']}: {e}")
-            self.telegram.send_error(f"❌ Исключение при обновлении TP/SL для {signal['symbol']}")
+            self.logger.error(f"❌ Исключение при обновлении TP/SL для {signal_id}: {e}")
+            self.telegram.send_error(f"❌ Исключение при обновлении TP/SL для {signal_id}")
     
     def _can_enter_position(self, signal: Dict) -> bool:
         """Проверка возможности входа в позицию"""
