@@ -153,15 +153,14 @@ class SignalProcessor:
                         continue
 
                     signal_time = signal['date']
-                    start_active = signal_time - timedelta(minutes=20)
                     end_active = signal_time + timedelta(minutes=20)
                     now = datetime.now()
 
-                    if now < start_active:
-                        self.logger.info(f"🕒 Сигнал в строке {signal['row']} ещё не активен (начало через {int((start_active - now).total_seconds() / 60)} мин)")
+                    if now < signal_time:
+                        self.logger.info(f"🕒 Сигнал в строке {signal['row']} ещё не наступил (до времени: {(signal_time - now).total_seconds() / 60:.1f} мин)")
                         continue
                     elif now > end_active:
-                        self.logger.warning(f"⚠️ Сигнал в строке {signal['row']} просрочен (прошло {(now - end_active).total_seconds() / 60:.1f} мин после окончания)")
+                        self.logger.warning(f"⚠️ Сигнал в строке {signal['row']} просрочен (прошло {(now - end_active).total_seconds() / 60:.1f} мин)")
                         continue
                     
                     usdtSize = self.exchange.get_balance() * 0.95 / int(self.config['MAX_POSITIONS'])
