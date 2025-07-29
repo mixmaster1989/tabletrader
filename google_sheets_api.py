@@ -88,7 +88,7 @@ class GoogleSheetsAPI:
                             'row': i,
                             'date': parsed_date,
                             'symbol': row[1].strip().upper(),
-                            'entry_price': float(row[2].replace(',', '.').split('/')[0].strip()),
+                            'entry_price': float(row[2].replace(',', '.').replace('$', '').split('/')[0].strip()),
                             'direction': row[3].strip().upper(),
                             'take_profit': float(row[4].replace(',', '.').split('/')[0].strip()),
                             'leverage': int(row[5].replace('X', '').strip()),

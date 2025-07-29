@@ -106,7 +106,7 @@ class SignalProcessor:
                             self.telegram.send_message(f"✅ TP/SL для {signal_id} успешно установлены. TP: {signal_data['take_profit']}, SL: {signal_data['stop_loss']}")
                         else:
                             self.logger.error(f"❌ Не удалось установить TP/SL для {signal_id}. Ошибка: {tp_sl_result.get('error')}")
-                            self.telegram.send_error(f"❌ Ошибка установки TP/SL для {signal_id}")
+                            self.telegram.send_error(f"❌ Ошибка установки TP/SL для {signal_id}, Попробуйте другие значения")
                     elif order_status in ['CANCELED', 'EXPIRED']:
                         self.logger.warning(f"❌ Ордер {signal_id} отменен или истек.")
                         self.processed_signals[signal_id]['status'] = OrderStatus.CLOSED.value

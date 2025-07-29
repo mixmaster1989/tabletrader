@@ -307,8 +307,7 @@ class BinanceAPI:
 
             # Установка Take Profit
             if take_profit:
-                try:
-                    tp_params = {
+                tp_params = {
                         'symbol': symbol_for_request,
                         'side': order_side,
                         'type': 'TAKE_PROFIT_MARKET',
@@ -317,17 +316,13 @@ class BinanceAPI:
                         'reduceOnly': 'true',
                         'workingType': 'MARK_PRICE'
                     }
-                    tp_result = self.client.futures_create_order(**tp_params)
-                    orders_placed['tp_order_id'] = tp_result['orderId']
-                    self.logger.info(f"✅ TP для {symbol} установлен: {tp_result}")
-                except BinanceAPIException as e:
-                    self.logger.error(f"❌ Ошибка установки TP для {symbol}: {e}")
-                    orders_placed['tp_error'] = str(e)
+                tp_result = self.client.futures_create_order(**tp_params)
+                orders_placed['tp_order_id'] = tp_result['orderId']
+                self.logger.info(f"✅ TP для {symbol} установлен: {tp_result}")
 
             # Установка Stop Loss
             if stop_loss:
-                try:
-                    sl_params = {
+                sl_params = {
                         'symbol': symbol_for_request,
                         'side': order_side,
                         'type': 'STOP_MARKET',
@@ -336,12 +331,10 @@ class BinanceAPI:
                         'reduceOnly': 'true',
                         'workingType': 'MARK_PRICE'
                     }
-                    sl_result = self.client.futures_create_order(**sl_params)
-                    orders_placed['sl_order_id'] = sl_result['orderId']
-                    self.logger.info(f"✅ SL для {symbol} установлен: {sl_result}")
-                except BinanceAPIException as e:
-                    self.logger.error(f"❌ Ошибка установки SL для {symbol}: {e}")
-                    orders_placed['sl_error'] = str(e)
+                sl_result = self.client.futures_create_order(**sl_params)
+                orders_placed['sl_order_id'] = sl_result['orderId']
+                self.logger.info(f"✅ SL для {symbol} установлен: {sl_result}")
+
 
             return {'success': True, 'orders': orders_placed}
 
