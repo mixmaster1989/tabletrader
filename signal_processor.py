@@ -146,12 +146,6 @@ class SignalProcessor:
                             self._update_tp_sl(signal, signal_id)
                         continue
 
-                    # Проверяем лимит открытых позиций
-                    active_positions = sum(1 for s in self.processed_signals.values() if s.get('status') == OrderStatus.FILLED.value)
-                    if active_positions >= int(self.config['MAX_POSITIONS']):
-                        self.logger.info(f"📊 Достигнут лимит активных позиций ({self.config['MAX_POSITIONS']}).")
-                        continue
-
                     signal_time = signal['date']
                     end_active = signal_time + timedelta(minutes=20)
                     now = datetime.now()
@@ -163,10 +157,13 @@ class SignalProcessor:
                         self.logger.warning(f"⚠️ Сигнал в строке {signal['row']} просрочен (прошло {(now - end_active).total_seconds() / 60:.1f} мин)")
                         continue
                     
-                    usdtSize = self.exchange.get_balance() * 0.95 / int(self.config['MAX_POSITIONS'])
-                    signal['size'] = usdtSize
+                    balance = self.exchange.get_balance() * 0.95 
+                    if balance < signal['size']:
+                        self.logger.warning(f"⚠️ Недостаточно средств на балансе для сигнала {signal['symbol']} в строке {signal['row']}")
+                        self.telegram.send_message(f"⚠️ Недостаточно средств на балансе для сигнала {signal['symbol']} в строке {signal['row']}")
+                        continue
 
-                    posSize = self.exchange.calculate_position_size(signal['symbol'], usdtSize,signal['entry_price'])
+                    posSize = self.exchange.calculate_position_size(signal['symbol'], signal['size'],signal['entry_price'])
                     
                     # Вход в позицию (выставление лимитного ордера)
                     if self._can_enter_position(signal):
