@@ -93,7 +93,7 @@ class GoogleSheetsAPI:
                             'take_profit': float(row[4].replace(',', '.').split('/')[0].strip()),
                             'leverage': int(row[5].replace('X', '').strip()),
                             'stop_loss': float(row[6].replace(',', '.').split('/')[0].strip()),
-                            'size': float(row[7].replace(',', '.').split('/')[0].strip()),
+                            'size': float(row[7].replace(',', '.').replace('\xa0', '').replace('$', '').split('/')[0].strip()),
                             'status': 'new'  # Статус для отслеживания
                         }
                         

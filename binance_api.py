@@ -233,6 +233,38 @@ class BinanceAPI:
             self.logger.error(f"❌ Исключение при проверке статуса ордера {order_id}: {e}")
             return None
 
+    def cancel_order(self, order_id: str, symbol: str) -> bool:
+        """Отменяет ордер по ID."""
+        try:
+            symbol_for_request = self._get_symbol_for_request(symbol)
+            result = self.client.futures_cancel_order(symbol=symbol_for_request, orderId=order_id)
+            self.logger.info(f"✅ Ордер {order_id} для {symbol} отменен: {result}")
+            return True
+        except BinanceAPIException as e:
+            if e.code == -2011: # Order does not exist
+                self.logger.warning(f"Ордер {order_id} для {symbol} уже не существует")
+                return True
+            self.logger.error(f"❌ Ошибка отмены ордера {order_id}: {e}")
+            return False
+        except Exception as e:
+            self.logger.error(f"❌ Исключение при отмене ордера {order_id}: {e}")
+            return False
+
+    def get_order_info(self, order_id: str, symbol: str) -> Optional[Dict]:
+        """Получает полную информацию об ордере."""
+        try:
+            symbol_for_request = self._get_symbol_for_request(symbol)
+            order = self.client.futures_get_order(symbol=symbol_for_request, orderId=order_id)
+            return order
+        except BinanceAPIException as e:
+            if e.code == -2013: # Order does not exist
+                return None
+            self.logger.error(f"❌ Ошибка получения информации об ордере {order_id}: {e}")
+            return None
+        except Exception as e:
+            self.logger.error(f"❌ Исключение при получении информации об ордере {order_id}: {e}")
+            return None
+
     def place_limit_order(self, params: Dict) -> Dict:
         """Размещает лимитный ордер."""
         try:

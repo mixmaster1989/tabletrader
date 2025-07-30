@@ -75,6 +75,15 @@ class SignalProcessor:
             # 1. Проверка статуса размещенных ордеров (PLACED)
             for signal_id, signal_data in list(self.processed_signals.items()):
                 if signal_data.get('status') == OrderStatus.PLACED.value:
+                    # Проверяем условия отмены ордера
+                    if self._check_order_cancellation_conditions(signal_id, signal_data):
+                        # Отменяем ордер
+                        if self.exchange.cancel_order(signal_data['order_id'], signal_data['symbol']):
+                            self.processed_signals[signal_id]['status'] = OrderStatus.CLOSED.value
+                            self.telegram.send_message(f"❌ Ордер {signal_id} отменен по условиям (таймаут или достижение TP)")
+                            self._save_processed_signals()
+                            continue
+                    
                     order_status = self.exchange.check_order_status(signal_data['order_id'], signal_data['symbol'])
                     if order_status == 'NOT_FOUND':
                         self.logger.info(f"❌ Ордер {signal_id} не найден!")
@@ -179,7 +188,8 @@ class SignalProcessor:
                                 'entry_price': signal['entry_price'],
                                 'take_profit': signal['take_profit'],
                                 'stop_loss': signal['stop_loss'],
-                                'size': posSize
+                                'size': posSize,
+                                'order_time': datetime.now().isoformat()  # Время размещения ордера
                             }
                             processed_count += 1
                             self._send_notification(self.processed_signals[signal_id], status=OrderStatus.PLACED)
@@ -280,6 +290,50 @@ class SignalProcessor:
                 'error': str(e)
             }
     
+    def _check_order_cancellation_conditions(self, signal_id: str, signal_data: Dict) -> bool:
+        """
+        Проверяет условия для отмены ордера:
+        1. Прошло 20 минут с размещения
+        2. Цена достигла тейк-профита без исполнения ордера
+        """
+        try:
+            # Проверяем, есть ли время размещения ордера
+            if 'order_time' not in signal_data:
+                return False
+            
+            order_time = datetime.fromisoformat(signal_data['order_time'])
+            current_time = datetime.now()
+            
+            # Правило 1: Таймаут 20 минут
+            time_diff = current_time - order_time
+            if time_diff.total_seconds() > 20 * 60:  # 20 минут в секундах
+                self.logger.warning(f"⏰ Ордер {signal_id} отменен по таймауту (прошло {time_diff.total_seconds() / 60:.1f} минут)")
+                return True
+            
+            # Правило 2: Проверка достижения тейк-профита
+            current_price = self.exchange.get_last_price(signal_data['symbol'])
+            if current_price is None:
+                return False
+            
+            take_profit = signal_data['take_profit']
+            direction = signal_data['direction']
+            
+            # Для LONG: если цена >= TP, но ордер не исполнен
+            if direction == 'LONG' and current_price >= take_profit:
+                self.logger.warning(f"🎯 Ордер {signal_id} отменен: цена {current_price} достигла TP {take_profit} без исполнения")
+                return True
+            
+            # Для SHORT: если цена <= TP, но ордер не исполнен
+            if direction == 'SHORT' and current_price <= take_profit:
+                self.logger.warning(f"🎯 Ордер {signal_id} отменен: цена {current_price} достигла TP {take_profit} без исполнения")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"❌ Ошибка проверки условий отмены ордера {signal_id}: {e}")
+            return False
+
     def _send_notification(self, signal_data: Dict, status: OrderStatus):
         """Отправка уведомления о сделке в зависимости от статуса."""
         try:
