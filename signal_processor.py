@@ -83,6 +83,20 @@ class SignalProcessor:
                             self.telegram.send_message(f"❌ Ордер {signal_id} отменен по условиям (таймаут или достижение TP)")
                             self._save_processed_signals()
                             continue
+                        else:
+                            # Если отмена не удалась, отмечаем как ошибку и отправляем уведомление
+                            self.processed_signals[signal_id]['status'] = OrderStatus.ERROR.value
+                            self.telegram.send_message(f"⚠️ ВНИМАНИЕ! Не удалось отменить ордер {signal_id} автоматически!\n\n"
+                                                      f"🔍 Проверьте вручную на бирже:\n"
+                                                      f"• Если ордер уже отменен - все хорошо\n"
+                                                      f"• Если ордер активен - отмените вручную\n\n"
+                                                      f"📊 Детали ордера:\n"
+                                                      f"• Символ: {signal_data['symbol']}\n"
+                                                      f"• Order ID: {signal_data['order_id']}\n"
+                                                      f"• Направление: {signal_data['direction']}\n"
+                                                      f"• Цена входа: {signal_data['entry_price']}")
+                            self._save_processed_signals()
+                            continue
                     
                     order_status = self.exchange.check_order_status(signal_data['order_id'], signal_data['symbol'])
                     if order_status == 'NOT_FOUND':
