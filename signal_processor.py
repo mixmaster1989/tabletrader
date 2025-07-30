@@ -69,6 +69,29 @@ class SignalProcessor:
         except Exception as e:
             self.logger.error(f"❌ Ошибка сохранения обработанных сигналов: {e}")
     
+    def get_status(self) -> Dict:
+        """Получить статус бота"""
+        try:
+            # Получаем количество открытых позиций
+            positions = self.exchange.get_positions()
+            open_positions = len([p for p in positions if float(p.get('positionAmt', 0)) != 0])
+            
+            # Получаем количество обработанных сигналов
+            processed_signals = len(self.processed_signals)
+            
+            return {
+                'last_check': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'processed_signals': processed_signals,
+                'open_positions': open_positions
+            }
+        except Exception as e:
+            self.logger.error(f"❌ Ошибка получения статуса: {e}")
+            return {
+                'last_check': 'Ошибка',
+                'processed_signals': 0,
+                'open_positions': 0
+            }
+    
     def process_signals(self) -> Dict:
         """Основной метод обработки сигналов"""
         try:

@@ -10,16 +10,19 @@ import logging
 import signal
 import sys
 import time
+import threading
 from datetime import datetime
 from config import load_config, validate_config
 from signal_processor import SignalProcessor
 from telegram_bot import TelegramBot
+from telegram_controller import TelegramController
 
 class GoogleSignalsBot:
     def __init__(self):
         self.config = None
         self.signal_processor = None
         self.telegram = None
+        self.telegram_controller = None
         self.running = False
         self.logger = logging.getLogger(__name__)
         
@@ -66,6 +69,13 @@ class GoogleSignalsBot:
             
             self.signal_processor = SignalProcessor(self.config)
             
+            # Инициализируем Telegram контроллер
+            self.telegram_controller = TelegramController(
+                self.config['TELEGRAM_BOT_TOKEN'],
+                self.config['TELEGRAM_CHAT_ID'],
+                self.signal_processor
+            )
+            
             # Тестируем подключения
             self._test_connections()
             
@@ -106,6 +116,11 @@ class GoogleSignalsBot:
         try:
             self.logger.info("Запуск Google Signals Bot...")
             self.telegram.send_message("Google Signals Bot запущен!")
+            
+            # Запускаем Telegram контроллер в отдельном потоке
+            telegram_thread = threading.Thread(target=self.telegram_controller.start, daemon=True)
+            telegram_thread.start()
+            self.logger.info("✅ Telegram контроллер запущен")
             
             self.running = True
             
@@ -154,6 +169,9 @@ class GoogleSignalsBot:
         
         if self.telegram:
             self.telegram.send_message("Google Signals Bot остановлен")
+        
+        if self.telegram_controller:
+            self.telegram_controller.stop()
         
         self.logger.info("Google Signals Bot остановлен")
 
