@@ -174,7 +174,7 @@ class SignalProcessor:
             signals = self.google_sheets.read_signals()
             
             if not signals:
-                self.logger.info("📊 Новых сигналов нет")
+                self.logger.info("📊 Сигналов нет")
                 return {'processed': 0, 'errors': 0}
             
             processed_count = 0
@@ -182,10 +182,14 @@ class SignalProcessor:
 
             for signal in signals:
                 try:
-                    signal_id = f"{signal['symbol']}_{signal['row']}"
+                    signal_id = f"{signal['symbol']}_{signal['id']}"
                     # Пропускаем, если сигнал уже в работе (не в статусе ERROR)
                     if signal_id in self.processed_signals and \
                        self.processed_signals[signal_id].get('status') not in [OrderStatus.ERROR.value]:
+                        # Логика обновления entry_price для еще не исполненных ордеров
+                        if self.processed_signals[signal_id].get('status') == OrderStatus.PLACED.value and \
+                           (signal['entry_price'] != self.processed_signals[signal_id]['entry_price']):
+                            self._set_new_entry_price(signal_id, signal)
                         # Логика обновления TP/SL для уже исполненных ордеров
                         if self.processed_signals[signal_id].get('status') == OrderStatus.FILLED.value and \
                            (signal['take_profit'] != self.processed_signals[signal_id]['take_profit'] or \
@@ -193,32 +197,45 @@ class SignalProcessor:
                             self._update_tp_sl(signal, signal_id)
                         continue
 
+                    # Пропускаем, если другой сигнал по этой же монете уже в работе
+                    
+                    is_signal_in_work = False
+                    
+                    for processed_signal_id, processed_signal in self.processed_signals.items():
+                        if processed_signal['symbol'] == signal['symbol'] and \
+                           processed_signal.get('status') not in [OrderStatus.ERROR.value, OrderStatus.CLOSED.value]:
+                            is_signal_in_work = True
+                            break
+
+                    if is_signal_in_work:
+                        continue
+
                     signal_time = signal['date']
                     end_active = signal_time + timedelta(minutes=20)
                     now = datetime.now()
 
                     if now < signal_time:
-                        self.logger.info(f"🕒 Сигнал в строке {signal['row']} ещё не наступил (до времени: {(signal_time - now).total_seconds() / 60:.1f} мин)")
+                        self.logger.info(f"🕒 Сигнал в строке {signal['id']} ещё не наступил (до времени: {(signal_time - now).total_seconds() / 60:.1f} мин)")
                         continue
                     elif now > end_active:
-                        self.logger.warning(f"⚠️ Сигнал в строке {signal['row']} просрочен (прошло {(now - end_active).total_seconds() / 60:.1f} мин)")
                         continue
                     
                     balance = self.exchange.get_balance() * 0.95 
                     if balance < signal['size']:
-                        self.logger.warning(f"⚠️ Недостаточно средств на балансе для сигнала {signal['symbol']} в строке {signal['row']}")
-                        self.telegram.send_message(f"⚠️ Недостаточно средств на балансе для сигнала {signal['symbol']} в строке {signal['row']}")
-                        continue
+                        self.logger.warning(f"⚠️ Недостаточно средств на балансе для сигнала {signal['symbol']} в строке {signal['id']}")
+                        signal['size'] = balance
 
                     posSize = self.exchange.calculate_position_size(signal['symbol'], signal['size'] * signal['leverage'],signal['entry_price'])
                     
                     # Вход в позицию (выставление лимитного ордера)
                     if self._can_enter_position(signal):
+                        self.logger.info(f"🚀 Выполнение сигнала {signal_id}")
                         result = self._execute_signal(signal, posSize)
                         
                         if result['success']:
                             self.processed_signals[signal_id] = {
                                 'status': OrderStatus.PLACED.value,
+                                'id': signal['id'],
                                 'order_id': result.get('order_id'),
                                 'symbol': signal['symbol'],
                                 'direction': signal['direction'],
@@ -226,20 +243,20 @@ class SignalProcessor:
                                 'take_profit': signal['take_profit'],
                                 'stop_loss': signal['stop_loss'],
                                 'size': posSize,
-                                'order_time': datetime.now().isoformat()  # Время размещения ордера
+                                'order_time': datetime.now().isoformat() # Время размещения ордера
                             }
                             processed_count += 1
                             self._send_notification(self.processed_signals[signal_id], status=OrderStatus.PLACED)
                             break # Выходим после успешного размещения одного ордера
                         else:
                             error_count += 1
-                            self.logger.error(f"❌ Ошибка выполнения сигнала {signal.get('symbol', 'Unknown')} в строке {signal['row']}: {result['error']}")
+                            self.logger.error(f"❌ Ошибка выполнения сигнала {signal.get('symbol', 'Unknown')} в строке {signal['id']}: {result['error']}")
                     else:
                         self.logger.info(f"⏸️ Сигнал {signal['symbol']} пропущен - условия не подходят")
                         
                 except Exception as e:
                     error_count += 1
-                    self.logger.error(f"❌ Ошибка обработки сигнала {signal.get('symbol', 'Unknown')} в строке {signal['row']}: {e}")
+                    self.logger.error(f"❌ Ошибка обработки сигнала {signal.get('symbol', 'Unknown')} в строке {signal['id']}: {e}")
             
             self._save_processed_signals() # Сохраняем состояние после цикла
             self.last_check_time = datetime.now()
@@ -268,13 +285,16 @@ class SignalProcessor:
             if update_result['success']:
                 self.processed_signals[signal_id]['take_profit'] = signal['take_profit']
                 self.processed_signals[signal_id]['stop_loss'] = signal['stop_loss']
+                self._save_processed_signals()
                 self.logger.info(f"✅ TP/SL для {signal_id} успешно обновлен. TP: {signal['take_profit']}, SL: {signal['stop_loss']}")
                 self.telegram.send_message(f"✅ TP/SL для {signal_id} успешно обновлен. TP: {signal['take_profit']}, SL: {signal['stop_loss']}")
             else:
                 error_msg = update_result.get('error', 'Неизвестная ошибка')
+                self.processed_signals[signal_id]['status'] = OrderStatus.ERROR.value
                 self.logger.error(f"❌ Ошибка обновления TP/SL для {signal_id}: {error_msg}")
                 self.telegram.send_error(f"❌ Ошибка обновления TP/SL для {signal_id}: {error_msg}")
         except Exception as e:
+            self.processed_signals[signal_id]['status'] = OrderStatus.ERROR.value
             self.logger.error(f"❌ Исключение при обновлении TP/SL для {signal_id}: {e}")
             self.telegram.send_error(f"❌ Исключение при обновлении TP/SL для {signal_id}")
     
@@ -287,12 +307,32 @@ class SignalProcessor:
                 if pos.get('symbol') == signal['symbol'] + 'USDT':
                     self.logger.info(f"⏸️ Позиция по {signal['symbol']} уже открыта")
                     return False
-            
+
             return True
             
         except Exception as e:
             self.logger.error(f"❌ Ошибка проверки возможности входа: {e}")
             return False
+
+    def _set_new_entry_price(self, signal_id: str, signal: Dict):
+        try:
+            posSize = self.exchange.calculate_position_size(signal['symbol'], signal['size'] * signal['leverage'],signal['entry_price'])
+            result = self._execute_signal(signal, posSize)
+            if result['success']:
+                self.logger.info(f"✅ Цена входа успешно изменена для {signal_id}")
+                self.telegram.send_message(f"✅ Цена входа успешно изменена для {signal_id}")
+                self.processed_signals[signal_id]['entry_price'] = signal['entry_price']
+                self.processed_signals[signal_id]['order_id'] = result.get('order_id')
+                self.processed_signals[signal_id]['order_time'] = datetime.now().isoformat()
+                self._save_processed_signals()
+            else:
+                self.processed_signals[signal_id]['status'] = OrderStatus.ERROR.value
+                self.logger.error(f"❌ Ошибка при изменении цены входа {signal_id}: {result['error']}")
+                self.telegram.send_error(f"❌ Ошибка при изменении цены входа {signal_id}")
+
+        except Exception as e:
+            self.processed_signals[signal_id]['status'] = OrderStatus.ERROR.value
+            self.logger.error(f"❌ Ошибка при изменении цены входа {signal_id}: {e}")
     
     def _execute_signal(self, signal: Dict, posSize: float) -> Dict:
         """Выполнение торгового сигнала"""
@@ -302,8 +342,6 @@ class SignalProcessor:
                 'side': signal['direction'],
                 'size': posSize,
                 'leverage': signal['leverage'],
-                'take_profit': signal['take_profit'],
-                'stop_loss': signal['stop_loss'],
                 'price': signal['entry_price']
             }
             
@@ -344,7 +382,7 @@ class SignalProcessor:
             # Правило 1: Таймаут 20 минут
             time_diff = current_time - order_time
             if time_diff.total_seconds() > 20 * 60:  # 20 минут в секундах
-                self.logger.warning(f"⏰ Ордер {signal_id} отменен по таймауту (прошло {time_diff.total_seconds() / 60:.1f} минут)")
+                self.logger.warning(f"⏰ Ордер {signal_id} не исполнен в течение 20 минут")
                 return True
             
             # Правило 2: Проверка достижения тейк-профита
@@ -357,12 +395,12 @@ class SignalProcessor:
             
             # Для LONG: если цена >= TP, но ордер не исполнен
             if direction == 'LONG' and current_price >= take_profit:
-                self.logger.warning(f"🎯 Ордер {signal_id} отменен: цена {current_price} достигла TP {take_profit} без исполнения")
+                self.logger.warning(f"🎯 Ордер {signal_id}: цена {current_price} достигла TP {take_profit}")
                 return True
             
             # Для SHORT: если цена <= TP, но ордер не исполнен
             if direction == 'SHORT' and current_price <= take_profit:
-                self.logger.warning(f"🎯 Ордер {signal_id} отменен: цена {current_price} достигла TP {take_profit} без исполнения")
+                self.logger.warning(f"🎯 Ордер {signal_id}: цена {current_price} достигла TP {take_profit}")
                 return True
             
             return False
@@ -377,7 +415,7 @@ class SignalProcessor:
             if status == OrderStatus.PLACED:
                 message = f"""🔵 ОРДЕР РАЗМЕЩЕН
 
-📊 Монета: {signal_data['symbol']}
+📊 ID: {signal_data['symbol']}_{signal_data['id']}
 📈 Направление: {signal_data['direction']}
 💰 Цена входа: {signal_data['entry_price']}$
 🎯 Take Profit: {signal_data['take_profit']}$
@@ -388,7 +426,7 @@ class SignalProcessor:
             elif status == OrderStatus.FILLED:
                 message = f"""✅ ОРДЕР ИСПОЛНЕН
 
-📊 Монета: {signal_data['symbol']}
+📊 ID: {signal_data['symbol']}_{signal_data['id']}
 📈 Направление: {signal_data['direction']}
 💰 Цена входа: {signal_data['entry_price']}$
 

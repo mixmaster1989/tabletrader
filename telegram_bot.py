@@ -34,7 +34,7 @@ class TelegramBot:
                 self.logger.info("✅ Сообщение отправлено в Telegram")
                 return True
             else:
-                self.logger.error(f"❌ Ошибка отправки в Telegram: {response.status_code}")
+                self.logger.error(f"❌ Ошибка отправки в Telegram: {response.status_code} {response.text}")
                 return False
                 
         except Exception as e:

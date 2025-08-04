@@ -15,14 +15,12 @@ from datetime import datetime
 from config import load_config, validate_config
 from signal_processor import SignalProcessor
 from telegram_bot import TelegramBot
-from telegram_controller import TelegramController
 
 class GoogleSignalsBot:
     def __init__(self):
         self.config = None
         self.signal_processor = None
         self.telegram = None
-        self.telegram_controller = None
         self.running = False
         self.logger = logging.getLogger(__name__)
         
@@ -69,13 +67,6 @@ class GoogleSignalsBot:
             
             self.signal_processor = SignalProcessor(self.config)
             
-            # Инициализируем Telegram контроллер
-            self.telegram_controller = TelegramController(
-                self.config['TELEGRAM_BOT_TOKEN'],
-                self.config['TELEGRAM_CHAT_ID'],
-                self.signal_processor
-            )
-            
             # Тестируем подключения
             self._test_connections()
             
@@ -94,15 +85,14 @@ class GoogleSignalsBot:
         if not self.telegram.test_connection():
             raise Exception("Не удалось подключиться к Telegram")
         
-        # Тест Bybit
         try:
             balance = self.signal_processor.exchange.get_balance()
             if balance:
-                self.logger.info(f"Bybit API подключен. Баланс: {balance}")
+                self.logger.info(f"Exchange API подключен. Баланс: {balance}")
             else:
-                raise Exception("Не удалось получить баланс Bybit")
+                raise Exception("Не удалось получить баланс Exchange")
         except Exception as e:
-            raise Exception(f"Ошибка подключения к Bybit: {e}")
+            raise Exception(f"Ошибка подключения к Exchange: {e}")
         
         # Тест Google Sheets
         try:
@@ -116,11 +106,6 @@ class GoogleSignalsBot:
         try:
             self.logger.info("Запуск Google Signals Bot...")
             self.telegram.send_message("Google Signals Bot запущен!")
-            
-            # Запускаем Telegram контроллер в отдельном потоке
-            telegram_thread = threading.Thread(target=self.telegram_controller.start, daemon=True)
-            telegram_thread.start()
-            self.logger.info("✅ Telegram контроллер запущен")
             
             self.running = True
             
@@ -137,13 +122,12 @@ class GoogleSignalsBot:
                     if result['errors'] > 0:
                         self.logger.warning(f"{result['errors']} ошибок при обработке")
                     
-                    # Отправляем статус каждые 200 циклов
                     if hasattr(self, '_cycle_count'):
                         self._cycle_count += 1
                     else:
                         self._cycle_count = 1
                     
-                    if self._cycle_count % 200 == 0:
+                    if self._cycle_count % 1600 == 0:
                         status = self.signal_processor.get_status()
                         self.telegram.send_status(status)
                     
@@ -169,9 +153,6 @@ class GoogleSignalsBot:
         
         if self.telegram:
             self.telegram.send_message("Google Signals Bot остановлен")
-        
-        if self.telegram_controller:
-            self.telegram_controller.stop()
         
         self.logger.info("Google Signals Bot остановлен")
 

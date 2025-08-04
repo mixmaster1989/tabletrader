@@ -40,11 +40,12 @@ class GoogleSheetsAPI:
             self.logger.error(f"❌ Ошибка инициализации Google Sheets API: {e}")
             raise
     
-    def read_signals(self, range_name: str = "'Trades'!B:M") -> List[Dict]:
+    def read_signals(self, range_name: str = "'Trades'!A:M") -> List[Dict]:
         """
         Читать сигналы из Google таблицы
         
         Ожидаемые колонки:
+        A - ID
         B - Время входа
         C - Символ
         D - Цена входа
@@ -80,20 +81,22 @@ class GoogleSheetsAPI:
             signals = []
             for i, row in enumerate(values[1:], start=2):  # Пропускаем заголовок
                 try:
-                    if len(row) >= 8:
+                    if len(row) >= 9:
                         date_format = "%d.%m.%Y %H:%M"
-                        parsed_date = datetime.strptime(row[0].strip(), date_format)
+                        parsed_date = datetime.strptime(row[1].strip(), date_format)
+                        if row[0].strip() == "":
+                            continue
 
                         signal = {
-                            'row': i,
+                            'id': int(row[0].strip()),
                             'date': parsed_date,
-                            'symbol': row[1].strip().upper(),
-                            'entry_price': float(row[2].replace(',', '.').replace('$', '').split('/')[0].strip()),
-                            'direction': row[3].strip().upper(),
-                            'take_profit': float(row[4].replace(',', '.').split('/')[0].strip()),
-                            'leverage': int(row[5].replace('X', '').strip()),
-                            'stop_loss': float(row[6].replace(',', '.').split('/')[0].strip()),
-                            'size': float(row[7].replace(',', '.').replace('\xa0', '').replace('$', '').split('/')[0].strip()),
+                            'symbol': row[2].strip().upper(),
+                            'entry_price': float(row[3].replace(',', '.').replace('$', '').replace(' ', '').split('/')[0].strip()),
+                            'direction': row[4].strip().upper(),
+                            'take_profit': float(row[5].replace(',', '.').split('/')[0].strip()),
+                            'leverage': int(row[6].replace('X', '').strip()),
+                            'stop_loss': float(row[7].replace(',', '.').split('/')[0].strip()),
+                            'size': float(row[8].replace(',', '.').replace('\xa0', '').replace(' ', '').replace('$', '').split('/')[0].strip()),
                             'status': 'new'  # Статус для отслеживания
                         }
                         
@@ -105,8 +108,6 @@ class GoogleSheetsAPI:
                         else:
                             self.logger.warning(f"⚠️ Невалидный сигнал в строке {i}: signal: {signal} raw: {row}")
                             self.logger.warning(f"⚠️ Ошибка валидации сигнала: {error}")
-                    else:
-                        self.logger.warning(f"⚠️ Неполная строка {i}: raw: {row}")
                         
                 except (ValueError, IndexError) as e:
                     self.logger.error(f"❌ Ошибка обработки строки {i}: {e}")
@@ -128,7 +129,7 @@ class GoogleSheetsAPI:
         
         :param signal: Словарь с данными сигнала
         {
-            'row': int,
+            'id': int,
             'date': datetime,
             'symbol': str,
             'entry_price': float,
@@ -142,8 +143,8 @@ class GoogleSheetsAPI:
         """
         try:
             # Проверка символа
-            if type(signal['row']) != int:
-                return "Номер строки должен быть целым числом"
+            if type(signal['id']) != int:
+                return "ID должен быть целым числом"
 
             if type(signal['date']) != datetime:
                 return "Дата входа должна быть datetime"

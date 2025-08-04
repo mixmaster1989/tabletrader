@@ -314,10 +314,10 @@ class BinanceAPI:
     
         except BinanceAPIException as e:
             self.logger.error(f"❌ Ошибка Binance API: {e}")
-            return {"success": False, "retCode": e.code, "retMsg": e.message}
+            return {"success": False, "status": e.code, "error": e.message}
         except Exception as e:
             self.logger.error(f"❌ Неизвестная ошибка: {e}")
-            return {"success": False, "retCode": 1, "retMsg": str(e)}
+            return {"success": False, "status": 1, "error": str(e)}
 
     def place_tp_sl_for_position(self, params: Dict) -> Dict:
         """Устанавливает TP/SL для существующей позиции."""
