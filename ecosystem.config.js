@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: "tabletrader-bot",
+      name: "tt",
       script: "main.py",
       interpreter: "./.venv/bin/python",
       cwd: "./",
