@@ -89,7 +89,7 @@ class GoogleSheetsAPI:
                             continue
 
                         signal = {
-                            'id': int(row[0].strip()),
+                            'id': row[0].strip(),
                             'date': parsed_date,
                             'symbol': row[2].strip().upper(),
                             'entry_price': float(row[3].replace(',', '.').replace('$', '').replace(' ', '').split('/')[0].strip()),
@@ -130,7 +130,7 @@ class GoogleSheetsAPI:
         
         :param signal: Словарь с данными сигнала
         {
-            'id': int,
+            'id': str,
             'date': datetime,
             'symbol': str,
             'entry_price': float,
@@ -143,10 +143,6 @@ class GoogleSheetsAPI:
         }
         """
         try:
-            # Проверка символа
-            if type(signal['id']) != int:
-                return "ID должен быть целым числом"
-
             if type(signal['date']) != datetime:
                 return "Дата входа должна быть datetime"
 
