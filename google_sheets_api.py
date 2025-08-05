@@ -68,7 +68,6 @@ class GoogleSheetsAPI:
             try:
                 with open('google_sheets_data.json', 'w', encoding='utf-8') as f:
                     json.dump(result, f, ensure_ascii=False, indent=4)
-                self.logger.info("💾 Результат чтения таблицы сохранен в google_sheets_data.json")
             except Exception as e:
                 self.logger.error(f"❌ Не удалось сохранить результат в файл: {e}")
             
@@ -85,6 +84,8 @@ class GoogleSheetsAPI:
                         date_format = "%d.%m.%Y %H:%M"
                         parsed_date = datetime.strptime(row[1].strip(), date_format)
                         if row[0].strip() == "":
+                            continue
+                        if len(row) >= 10 and row[9].strip() != "":
                             continue
 
                         signal = {

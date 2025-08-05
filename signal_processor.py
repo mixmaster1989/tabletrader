@@ -135,6 +135,12 @@ class SignalProcessor:
                     if order_status == 'FILLED':
                         self.logger.info(f"✅ Ордер {signal_id} исполнен!")
                         self.processed_signals[signal_id]['status'] = OrderStatus.FILLED.value
+                        order_info = self.exchange.get_order_info(signal_data['order_id'], signal_data['symbol'])
+                        print(order_info)
+                        if order_info.get("status") == "FILLED":
+                            self.processed_signals[signal_id]['real_entry_price'] = float(order_info.get("avgPrice"))
+                        else:
+                            self.processed_signals[signal_id]['real_entry_price'] = signal_data['entry_price']
                         self._send_notification(self.processed_signals[signal_id], status=OrderStatus.FILLED)
 
                         # Устанавливаем TP/SL для новой позиции
@@ -167,14 +173,14 @@ class SignalProcessor:
                     position_symbol = signal_data['symbol'] + 'USDT'
                     if position_symbol not in open_position_symbols:
                         self.logger.info(f"🔄 Позиция по сигналу {signal_id} закрыта на бирже.")
+                        close_reason = self._get_position_close_reason(signal_data)
                         self.processed_signals[signal_id]['status'] = OrderStatus.CLOSED.value
-                        self.telegram.send_message(f"✅ Позиция по сигналу {signal_id} закрыта.")
+                        self.telegram.send_message(f"✅ Позиция по сигналу {signal_id} закрыта {close_reason}.")
 
             # Читаем сигналы из Google таблицы
             signals = self.google_sheets.read_signals()
             
             if not signals:
-                self.logger.info("📊 Сигналов нет")
                 return {'processed': 0, 'errors': 0}
             
             processed_count = 0
@@ -183,9 +189,8 @@ class SignalProcessor:
             for signal in signals:
                 try:
                     signal_id = f"{signal['symbol']}_{signal['id']}"
-                    # Пропускаем, если сигнал уже в работе (не в статусе ERROR)
-                    if signal_id in self.processed_signals and \
-                       self.processed_signals[signal_id].get('status') not in [OrderStatus.ERROR.value]:
+                    # Пропускаем, если сигнал уже в работе
+                    if signal_id in self.processed_signals:
                         # Логика обновления entry_price для еще не исполненных ордеров
                         if self.processed_signals[signal_id].get('status') == OrderStatus.PLACED.value and \
                            (signal['entry_price'] != self.processed_signals[signal_id]['entry_price']):
@@ -272,6 +277,27 @@ class SignalProcessor:
             self._save_processed_signals() # Сохраняем состояние даже если была ошибка
             return {'processed': 0, 'errors': 1}
 
+    def _get_position_close_reason(self, signal_data: dict) -> str:
+        """Определяет причину закрытия позиции: по SL, TP или вручную."""
+        symbol = signal_data.get('symbol')
+        sl_order_id = signal_data.get('sl_order_id')
+        tp_order_id = signal_data.get('tp_order_id')
+
+        if tp_order_id:
+            tp_order = self.exchange.get_order_info(tp_order_id, symbol)
+            if tp_order and tp_order.get('status') == 'FILLED':
+                self.logger.info(f"✅ Позиция по {symbol} закрыта по тейк-профиту.")
+                return f"по TP {signal_data['take_profit']}"
+
+        if sl_order_id:
+            sl_order = self.exchange.get_order_info(sl_order_id, symbol)
+            if sl_order and sl_order.get('status') == 'FILLED':
+                self.logger.info(f"✅ Позиция по {symbol} закрыта по стоп-лоссу.")
+                return f"по SL {signal_data['stop_loss']}"
+
+        self.logger.info(f"✅ Позиция по {symbol} закрыта вручную.")
+        return "вручную"
+
     def _update_tp_sl(self, signal: Dict, signal_id: str):
         """Обновляет Take Profit и Stop Loss для активной позиции."""
         try:
@@ -285,18 +311,18 @@ class SignalProcessor:
             if update_result['success']:
                 self.processed_signals[signal_id]['take_profit'] = signal['take_profit']
                 self.processed_signals[signal_id]['stop_loss'] = signal['stop_loss']
+                self.processed_signals[signal_id]['tp_order_id'] = update_result['tp_order_id']
+                self.processed_signals[signal_id]['sl_order_id'] = update_result['sl_order_id']
                 self._save_processed_signals()
                 self.logger.info(f"✅ TP/SL для {signal_id} успешно обновлен. TP: {signal['take_profit']}, SL: {signal['stop_loss']}")
                 self.telegram.send_message(f"✅ TP/SL для {signal_id} успешно обновлен. TP: {signal['take_profit']}, SL: {signal['stop_loss']}")
             else:
                 error_msg = update_result.get('error', 'Неизвестная ошибка')
-                self.processed_signals[signal_id]['status'] = OrderStatus.ERROR.value
                 self.logger.error(f"❌ Ошибка обновления TP/SL для {signal_id}: {error_msg}")
-                self.telegram.send_error(f"❌ Ошибка обновления TP/SL для {signal_id}: {error_msg}")
+                self.telegram.send_error(f"❌ Ошибка обновления TP/SL для {signal_id}. Попробуйте другие значения")
         except Exception as e:
-            self.processed_signals[signal_id]['status'] = OrderStatus.ERROR.value
             self.logger.error(f"❌ Исключение при обновлении TP/SL для {signal_id}: {e}")
-            self.telegram.send_error(f"❌ Исключение при обновлении TP/SL для {signal_id}")
+            self.telegram.send_error(f"❌ Исключение при обновлении TP/SL для {signal_id}.")
     
     def _can_enter_position(self, signal: Dict) -> bool:
         """Проверка возможности входа в позицию"""
@@ -388,6 +414,7 @@ class SignalProcessor:
             # Правило 2: Проверка достижения тейк-профита
             current_price = self.exchange.get_last_price(signal_data['symbol'])
             if current_price is None:
+                self.logger.warning(f"❌ Ордер {signal_id}: цена не определена")
                 return False
             
             take_profit = signal_data['take_profit']
@@ -428,7 +455,7 @@ class SignalProcessor:
 
 📊 ID: {signal_data['symbol']}_{signal_data['id']}
 📈 Направление: {signal_data['direction']}
-💰 Цена входа: {signal_data['entry_price']}$
+💰 Цена входа: {signal_data['real_entry_price']}$
 
 ✅ Позиция открыта!
 🆔 Order ID: {signal_data.get('order_id', 'N/A')}

@@ -186,8 +186,14 @@ class BinanceAPI:
                      # Может быть ошибка, если ордер уже исполнен или отменен, продолжаем
                      self.logger.warning(f"Не удалось отменить ордер {order_id}: {e}")
 
-            self.logger.info(f"✅ TP/SL для {symbol_for_request} успешно изменены/установлены.")
-            return {"success": True, "result": placed_orders}
+            if len(placed_orders) == 2:
+                self.logger.info(f"✅ TP/SL для {symbol_for_request} успешно изменены/установлены.")
+                tp_order_id = placed_orders[0]['orderId']
+                sl_order_id = placed_orders[1]['orderId']
+                return {"success": True, "tp_order_id": tp_order_id, "sl_order_id": sl_order_id}
+            else:
+                self.logger.warning(f"⚠️ Не удалось установить TP/SL для {symbol_for_request}")
+                return {"success": False, "error": "Не удалось установить TP/SL"}
 
         except BinanceAPIException as e:
             self.logger.error(f"❌ Ошибка изменения TP/SL для {params.get('symbol', 'UNKNOWN')}: {e}")
@@ -324,7 +330,6 @@ class BinanceAPI:
         try:
             symbol = params['symbol']
             side = params['direction'] # 'LONG' или 'SHORT'
-            quantity = params['size']
             take_profit = params['take_profit']
             stop_loss = params['stop_loss']
 
@@ -339,9 +344,8 @@ class BinanceAPI:
                         'symbol': symbol_for_request,
                         'side': order_side,
                         'type': 'TAKE_PROFIT_MARKET',
-                        'quantity': str(quantity),
+                        'closePosition': 'true',
                         'stopPrice': str(take_profit),
-                        'reduceOnly': 'true',
                         'workingType': 'MARK_PRICE'
                     }
                 tp_result = self.client.futures_create_order(**tp_params)
@@ -354,9 +358,8 @@ class BinanceAPI:
                         'symbol': symbol_for_request,
                         'side': order_side,
                         'type': 'STOP_MARKET',
-                        'quantity': str(quantity),
+                        'closePosition': 'true',
                         'stopPrice': str(stop_loss),
-                        'reduceOnly': 'true',
                         'workingType': 'MARK_PRICE'
                     }
                 sl_result = self.client.futures_create_order(**sl_params)
