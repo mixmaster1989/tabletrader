@@ -191,9 +191,6 @@ class SignalProcessor:
                     signal_id = f"{signal['symbol']}_{signal['id']}"
                     # Пропускаем, если сигнал уже в работе
                     if signal_id in self.processed_signals:
-                        self.processed_signals[signal_id]['entry_price'] = signal['entry_price']
-                        self.processed_signals[signal_id]['take_profit'] = signal['take_profit']
-                        self.processed_signals[signal_id]['stop_loss'] = signal['stop_loss']
                         # Логика обновления entry_price для еще не исполненных ордеров
                         if self.processed_signals[signal_id].get('status') == OrderStatus.PLACED.value and \
                            (signal['entry_price'] != self.processed_signals[signal_id]['entry_price']):
@@ -203,6 +200,10 @@ class SignalProcessor:
                            (signal['take_profit'] != self.processed_signals[signal_id]['take_profit'] or \
                             signal['stop_loss'] != self.processed_signals[signal_id]['stop_loss']):
                             self._update_tp_sl(signal, signal_id)
+
+                        self.processed_signals[signal_id]['entry_price'] = signal['entry_price']
+                        self.processed_signals[signal_id]['take_profit'] = signal['take_profit']
+                        self.processed_signals[signal_id]['stop_loss'] = signal['stop_loss']
                         continue
 
                     # Пропускаем, если другой сигнал по этой же монете уже в работе

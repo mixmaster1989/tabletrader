@@ -7,7 +7,7 @@
 
 import logging
 import time
-from decimal import Decimal, ROUND_DOWN
+from decimal import ROUND_HALF_UP, Decimal, ROUND_DOWN
 from typing import Dict, List, Optional, Union
 
 from binance.client import Client
@@ -282,6 +282,7 @@ class BinanceAPI:
             size = params['size']
             leverage = int(params['leverage'])
             price = params.get('price')
+            price = self.calculate_prices(params['symbol'], [params['price']])[0]
     
             self.logger.info(f"🛠️ Открытие ордера: {symbol_for_request}, {binance_side}, Размер: {size}, Плечо: {leverage}")
     
@@ -330,8 +331,9 @@ class BinanceAPI:
         try:
             symbol = params['symbol']
             side = params['direction'] # 'LONG' или 'SHORT'
-            take_profit = params['take_profit']
-            stop_loss = params['stop_loss']
+            prices = self.calculate_prices(symbol, [params['take_profit'], params['stop_loss']])
+            take_profit = prices[0]
+            stop_loss = prices[1]
 
             symbol_for_request = self._get_symbol_for_request(symbol)
             order_side = 'SELL' if side == 'LONG' else 'BUY'
@@ -372,6 +374,58 @@ class BinanceAPI:
         except Exception as e:
             self.logger.error(f"❌ Исключение при установке TP/SL для {params.get('symbol', 'UNKNOWN')}: {e}")
             return {'success': False, 'error': str(e)}
+
+    def calculate_prices(self, symbol: str, prices: List[float]) -> List[float]:
+        """
+        Корректирует список цен по tickSize для указанного символа.
+
+        :param symbol: Тикер (например, 'BLZ')
+        :param prices: Список цен (например, [take_profit, stop_loss])
+        :return: Список скорректированных цен
+        """
+        try:
+            symbol_for_request = self._get_symbol_for_request(symbol)
+
+            exchange_info = self.client.futures_exchange_info()
+            symbol_info = next(
+                (s for s in exchange_info['symbols'] if s['symbol'] == symbol_for_request),
+                None
+            )
+
+            if not symbol_info:
+                raise ValueError(f"Информация о символе {symbol_for_request} не найдена")
+
+            filters = {f['filterType']: f for f in symbol_info['filters']}
+            price_filter = filters.get('PRICE_FILTER')
+            if not price_filter:
+                raise ValueError(f"Фильтр PRICE_FILTER не найден для {symbol_for_request}")
+
+            tick_size_str = price_filter['tickSize']
+            tick_size_dec = Decimal(tick_size_str).normalize()
+
+            adjusted_prices = []
+            for p in prices:
+                price_dec = Decimal(str(p))
+                # Прямое округление до tickSize
+                adj_price = price_dec.quantize(tick_size_dec, rounding=ROUND_HALF_UP)
+                # Преобразуем в float с правильным количеством знаков
+                adj_float = float(adj_price)
+
+                # Определяем количество знаков после запятой в tick_size
+                if '.' in tick_size_str:
+                    decimals = len(tick_size_str.split('.')[1])
+                else:
+                    decimals = 0
+
+                adj_float = round(adj_float, decimals)
+                adjusted_prices.append(adj_float)
+
+            self.logger.info(f"✅ Цены для {symbol} скорректированы из {prices} в {adjusted_prices}")
+            return adjusted_prices
+
+        except Exception as e:
+            self.logger.error(f"❌ Ошибка при корректировке цен для {symbol}: {e}")
+            return []
 
     def calculate_position_size(self, symbol: str, usdt_size: float, last_price: float) -> float:
         try:
