@@ -346,6 +346,10 @@ class SignalProcessor:
 
     def _set_new_entry_price(self, signal_id: str, signal: Dict):
         try:
+            balance = self.exchange.get_balance() * 0.95 
+            if balance < signal['size']:
+                self.logger.warning(f"⚠️ Недостаточно средств на балансе для сигнала {signal['symbol']} в строке {signal['id']}")
+                signal['size'] = balance
             posSize = self.exchange.calculate_position_size(signal['symbol'], signal['size'] * signal['leverage'],signal['entry_price'])
             result = self._execute_signal(signal, posSize)
             if result['success']:
