@@ -403,7 +403,7 @@ class SignalProcessor:
     def _check_order_cancellation_conditions(self, signal_id: str, signal_data: Dict) -> bool:
         """
         Проверяет условия для отмены ордера:
-        1. Прошло 20 минут с размещения
+        1. Прошло 5 минут с размещения
         2. Цена достигла тейк-профита без исполнения ордера
         """
         try:
@@ -414,10 +414,10 @@ class SignalProcessor:
             order_time = datetime.fromisoformat(signal_data['order_time'])
             current_time = datetime.now()
             
-            # Правило 1: Таймаут 20 минут
+            # Правило 1: Таймаут 5 минут
             time_diff = current_time - order_time
-            if time_diff.total_seconds() > 20 * 60:  # 20 минут в секундах
-                self.logger.warning(f"⏰ Ордер {signal_id} не исполнен в течение 20 минут")
+            if time_diff.total_seconds() > 5 * 60:  # 5 минут в секундах
+                self.logger.warning(f"⏰ Ордер {signal_id} не исполнен в течение 5 минут")
                 return True
             
             # Правило 2: Проверка достижения тейк-профита
