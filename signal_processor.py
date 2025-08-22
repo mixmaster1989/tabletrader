@@ -407,18 +407,18 @@ class SignalProcessor:
         2. Цена достигла тейк-профита без исполнения ордера
         """
         try:
-            # Проверяем, есть ли время размещения ордера
-            if 'order_time' not in signal_data:
-                return False
+            # # Проверяем, есть ли время размещения ордера
+            # if 'order_time' not in signal_data:
+            #     return False
             
-            order_time = datetime.fromisoformat(signal_data['order_time'])
-            current_time = datetime.now()
+            # order_time = datetime.fromisoformat(signal_data['order_time'])
+            # current_time = datetime.now()
             
-            # Правило 1: Таймаут 5 минут
-            time_diff = current_time - order_time
-            if time_diff.total_seconds() > 5 * 60:  # 5 минут в секундах
-                self.logger.warning(f"⏰ Ордер {signal_id} не исполнен в течение 5 минут")
-                return True
+            # # Правило 1: Таймаут 5 минут
+            # time_diff = current_time - order_time
+            # if time_diff.total_seconds() > 5 * 60:  # 5 минут в секундах
+            #     self.logger.warning(f"⏰ Ордер {signal_id} не исполнен в течение 5 минут")
+            #     return True
             
             # Правило 2: Проверка достижения тейк-профита
             current_price = self.exchange.get_last_price(signal_data['symbol'])
